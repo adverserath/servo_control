@@ -18,8 +18,12 @@ class InputManager:
             pygame.display.set_mode((1, 1), pygame.HIDDEN)
         
         # Initialize joystick module if not already initialized
-        if not pygame.joystick.get_init():
-            pygame.joystick.init()
+        try:
+            if not pygame.joystick.get_init():
+                pygame.joystick.init()
+        except pygame.error as e:
+            print(f"Error initializing joystick module: {e}")
+            self.error = str(e)
         
         # Initialize joystick
         self.joystick = None
@@ -46,16 +50,21 @@ class InputManager:
     def _connect_joystick(self):
         """Try to connect to the first available joystick"""
         try:
-            if pygame.joystick.get_count() > 0:
-                self.joystick = pygame.joystick.Joystick(0)
-                self.joystick.init()
-                self.connected = True
-                self.error = None
-                print(f"Connected to joystick: {self.joystick.get_name()}")
+            if pygame.joystick.get_init():  # Check if joystick system is initialized
+                if pygame.joystick.get_count() > 0:
+                    self.joystick = pygame.joystick.Joystick(0)
+                    self.joystick.init()
+                    self.connected = True
+                    self.error = None
+                    print(f"Connected to joystick: {self.joystick.get_name()}")
+                else:
+                    self.connected = False
+                    self.error = "No joystick found"
+                    print("No joystick found")
             else:
                 self.connected = False
-                self.error = "No joystick found"
-                print("No joystick found")
+                self.error = "Joystick system not initialized"
+                print("Joystick system not initialized")
         except Exception as e:
             self.connected = False
             self.error = str(e)
@@ -65,15 +74,24 @@ class InputManager:
         """Main input processing loop"""
         while self.running:
             try:
-                # Check joystick connection
-                if not self.connected and pygame.joystick.get_count() > 0:
-                    self._connect_joystick()
-                elif self.connected and pygame.joystick.get_count() == 0:
-                    self.connected = False
-                    self.error = "Joystick disconnected"
-                
-                # Process events in the main loop
-                self.process_events()
+                if pygame.joystick.get_init():  # Check if joystick system is initialized
+                    # Check joystick connection
+                    if not self.connected and pygame.joystick.get_count() > 0:
+                        self._connect_joystick()
+                    elif self.connected and pygame.joystick.get_count() == 0:
+                        self.connected = False
+                        self.error = "Joystick disconnected"
+                    
+                    # Process events in the main loop
+                    self.process_events()
+                else:
+                    # Try to initialize joystick system if it's not initialized
+                    try:
+                        pygame.joystick.init()
+                        print("Joystick system initialized")
+                    except pygame.error as e:
+                        self.error = f"Failed to initialize joystick system: {e}"
+                        print(self.error)
                 
                 time.sleep(0.01)  # Small delay to prevent CPU overuse
                 
