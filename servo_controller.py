@@ -20,19 +20,14 @@ if not os.environ.get('XDG_RUNTIME_DIR'):
 GPIO.setmode(GPIO.BCM)
 GPIO.setwarnings(False)
 
-# Define GPIO pins for the servos
-SERVO_HORIZONTAL_PIN = HORIZONTAL_PIN
-SERVO_VERTICAL_PIN = VERTICAL_PIN
-SERVO_FOCUS_PIN = FOCUS_PIN
-
 # Set up PWM for each servo
-GPIO.setup(SERVO_HORIZONTAL_PIN, GPIO.OUT)
-GPIO.setup(SERVO_VERTICAL_PIN, GPIO.OUT)
-GPIO.setup(SERVO_FOCUS_PIN, GPIO.OUT)
+GPIO.setup(HORIZONTAL_PIN, GPIO.OUT)
+GPIO.setup(VERTICAL_PIN, GPIO.OUT)
+GPIO.setup(FOCUS_PIN, GPIO.OUT)
 
-pwm_horizontal = GPIO.PWM(SERVO_HORIZONTAL_PIN, PWM_FREQ)
-pwm_vertical = GPIO.PWM(SERVO_VERTICAL_PIN, PWM_FREQ)
-pwm_focus = GPIO.PWM(SERVO_FOCUS_PIN, PWM_FREQ)
+pwm_horizontal = GPIO.PWM(HORIZONTAL_PIN, PWM_FREQ)
+pwm_vertical = GPIO.PWM(VERTICAL_PIN, PWM_FREQ)
+pwm_focus = GPIO.PWM(FOCUS_PIN, PWM_FREQ)
 
 pwm_horizontal.start(0)
 pwm_vertical.start(0)
@@ -115,14 +110,14 @@ class ServoController:
         GPIO.setwarnings(False)
         
         # Setup PWM pins
-        GPIO.setup(SERVO_HORIZONTAL_PIN, GPIO.OUT)
-        GPIO.setup(SERVO_VERTICAL_PIN, GPIO.OUT)
-        GPIO.setup(SERVO_FOCUS_PIN, GPIO.OUT)
+        GPIO.setup(HORIZONTAL_PIN, GPIO.OUT)
+        GPIO.setup(VERTICAL_PIN, GPIO.OUT)
+        GPIO.setup(FOCUS_PIN, GPIO.OUT)
         
         # Create PWM objects
-        self.horizontal_pwm = GPIO.PWM(SERVO_HORIZONTAL_PIN, PWM_FREQ)
-        self.vertical_pwm = GPIO.PWM(SERVO_VERTICAL_PIN, PWM_FREQ)
-        self.focus_pwm = GPIO.PWM(SERVO_FOCUS_PIN, PWM_FREQ)
+        self.horizontal_pwm = GPIO.PWM(HORIZONTAL_PIN, PWM_FREQ)
+        self.vertical_pwm = GPIO.PWM(VERTICAL_PIN, PWM_FREQ)
+        self.focus_pwm = GPIO.PWM(FOCUS_PIN, PWM_FREQ)
         
         # Start PWM
         self.horizontal_pwm.start(0)

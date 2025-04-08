@@ -5,6 +5,7 @@ import numpy as np
 import threading
 import sys
 import os
+from config import HORIZONTAL_PIN, VERTICAL_PIN, FOCUS_PIN, PWM_FREQ
 
 # Mock GPIO module for local testing
 class MockGPIO:
@@ -48,23 +49,18 @@ class MockGPIO:
 # Replace GPIO with our mock for local testing
 GPIO = MockGPIO
 
-# Define GPIO pins for the servos
-SERVO_HORIZONTAL_PIN = 17  # Azimuth (Horizontal)
-SERVO_VERTICAL_PIN = 18    # Elevation (Vertical)
-SERVO_FOCUS_PIN = 27       # Focus
-
 # Set up the Raspberry Pi GPIO (mocked)
 GPIO.setmode(GPIO.BCM)
 GPIO.setwarnings(False)
 
 # Set up PWM for each servo
-GPIO.setup(SERVO_HORIZONTAL_PIN, GPIO.OUT)
-GPIO.setup(SERVO_VERTICAL_PIN, GPIO.OUT)
-GPIO.setup(SERVO_FOCUS_PIN, GPIO.OUT)
+GPIO.setup(HORIZONTAL_PIN, GPIO.OUT)
+GPIO.setup(VERTICAL_PIN, GPIO.OUT)
+GPIO.setup(FOCUS_PIN, GPIO.OUT)
 
-pwm_horizontal = GPIO.PWM(SERVO_HORIZONTAL_PIN, 50)
-pwm_vertical = GPIO.PWM(SERVO_VERTICAL_PIN, 50)
-pwm_focus = GPIO.PWM(SERVO_FOCUS_PIN, 50)
+pwm_horizontal = GPIO.PWM(HORIZONTAL_PIN, PWM_FREQ)
+pwm_vertical = GPIO.PWM(VERTICAL_PIN, PWM_FREQ)
+pwm_focus = GPIO.PWM(FOCUS_PIN, PWM_FREQ)
 
 pwm_horizontal.start(0)
 pwm_vertical.start(0)

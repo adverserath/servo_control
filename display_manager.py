@@ -27,7 +27,7 @@ class DisplayManager:
         
         # Draw status text
         status_text = []
-        status_text.append(f"RTSP: {'Connected' if camera_connected else 'Disconnected'}")
+        status_text.append(f"Camera: {'Connected' if camera_connected else 'Disconnected'}")
         status_text.append(f"Controls: {'Joystick' if input_manager.joystick_connected else 'Keyboard'}")
         status_text.append(f"Horizontal: {servo_positions['horizontal']:.2f}")
         status_text.append(f"Vertical: {servo_positions['vertical']:.2f}")

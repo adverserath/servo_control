@@ -6,7 +6,7 @@ import numpy as np
 from flask import Flask, Response, render_template, request, jsonify
 from dotenv import load_dotenv
 import RPi.GPIO as GPIO
-from config import SCREEN_WIDTH, SCREEN_HEIGHT
+from config import SCREEN_WIDTH, SCREEN_HEIGHT, HORIZONTAL_PIN, VERTICAL_PIN, FOCUS_PIN, PWM_FREQ
 from motor_controller import create_motor_controller
 
 # Load environment variables
@@ -27,22 +27,17 @@ camera_connected = False
 frame = None
 frame_lock = threading.Lock()
 
-# Define GPIO pins for servos
-SERVO_HORIZONTAL_PIN = int(os.environ.get('SERVO_HORIZONTAL_PIN', 17))
-SERVO_VERTICAL_PIN = int(os.environ.get('SERVO_VERTICAL_PIN', 18))
-SERVO_FOCUS_PIN = int(os.environ.get('SERVO_FOCUS_PIN', 27))
-
 # Setup GPIO
 GPIO.setmode(GPIO.BCM)
 GPIO.setwarnings(False)
 
-GPIO.setup(SERVO_HORIZONTAL_PIN, GPIO.OUT)
-GPIO.setup(SERVO_VERTICAL_PIN, GPIO.OUT)
-GPIO.setup(SERVO_FOCUS_PIN, GPIO.OUT)
+GPIO.setup(HORIZONTAL_PIN, GPIO.OUT)
+GPIO.setup(VERTICAL_PIN, GPIO.OUT)
+GPIO.setup(FOCUS_PIN, GPIO.OUT)
 
-pwm_horizontal = GPIO.PWM(SERVO_HORIZONTAL_PIN, 50)
-pwm_vertical = GPIO.PWM(SERVO_VERTICAL_PIN, 50)
-pwm_focus = GPIO.PWM(SERVO_FOCUS_PIN, 50)
+pwm_horizontal = GPIO.PWM(HORIZONTAL_PIN, PWM_FREQ)
+pwm_vertical = GPIO.PWM(VERTICAL_PIN, PWM_FREQ)
+pwm_focus = GPIO.PWM(FOCUS_PIN, PWM_FREQ)
 
 pwm_horizontal.start(0)
 pwm_vertical.start(0)

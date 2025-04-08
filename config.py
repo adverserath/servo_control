@@ -17,5 +17,5 @@ FOCUS_PIN = int(os.environ.get('SERVO_FOCUS_PIN', 27))
 PWM_FREQ = 50  # Standard 50Hz for servos
 
 # Display settings
-DISPLAY_CAPTION = "Servo Controller with RTSP Camera"
+DISPLAY_CAPTION = "Servo Controller with Camera"
 FRAME_RATE = 60 
