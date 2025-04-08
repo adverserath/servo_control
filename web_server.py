@@ -6,9 +6,19 @@ import numpy as np
 from flask import Flask, Response, render_template, request, jsonify
 from dotenv import load_dotenv
 import RPi.GPIO as GPIO
+from config import SCREEN_WIDTH, SCREEN_HEIGHT
+from motor_controller import create_motor_controller
 
 # Load environment variables
 load_dotenv()
+
+# Handle XDG_RUNTIME_DIR issue on Raspberry Pi OS
+if not os.environ.get('XDG_RUNTIME_DIR'):
+    # Create runtime directory in /run/user/$(id -u)
+    user_id = os.getuid()
+    runtime_dir = f'/run/user/{user_id}'
+    os.makedirs(runtime_dir, exist_ok=True)
+    os.environ['XDG_RUNTIME_DIR'] = runtime_dir
 
 app = Flask(__name__)
 
@@ -43,30 +53,30 @@ horizontal_pos = 0
 vertical_pos = 0
 focus_pos = 0
 
-# Thread to capture from camera
+# Thread to capture from Pi camera
 def camera_stream_thread():
     global frame, camera_connected
     
     try:
-        # Initialize camera
-        cap = cv2.VideoCapture(0)  # Use default camera
-        if not cap.isOpened():
-            print("Cannot open camera")
-            return
-            
-        camera_connected = True
-        print("Camera connected")
+        # Initialize Pi camera
+        import picamera
+        import picamera.array
         
-        while True:
-            ret, new_frame = cap.read()
-            if not ret:
-                print("Failed to get frame")
-                break
-                
-            with frame_lock:
-                frame = new_frame
+        with picamera.PiCamera() as camera:
+            camera.resolution = (800, 600)
+            camera.framerate = 30
             
-            time.sleep(0.033)  # ~30fps
+            # Create a numpy array to store the frame
+            output = picamera.array.PiRGBArray(camera, size=(800, 600))
+            
+            camera_connected = True
+            print("Pi camera connected")
+            
+            for frame_array in camera.capture_continuous(output, format='bgr', use_video_port=True):
+                with frame_lock:
+                    frame = frame_array.array
+                output.truncate(0)
+                time.sleep(0.033)  # ~30fps
                 
     except Exception as e:
         print(f"Camera Error: {e}")
