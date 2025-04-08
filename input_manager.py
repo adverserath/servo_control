@@ -1,81 +1,104 @@
 import pygame
+import threading
+import time
 
 class InputManager:
     def __init__(self):
-        # Controller state
-        self.joystick = None
-        self.joystick_connected = False
+        pygame.init()
+        pygame.joystick.init()
         
-        # Position values
+        # Initialize joystick
+        self.joystick = None
+        self.connected = False
+        self.error = None
+        
+        # Joystick values
         self.horizontal = 0
         self.vertical = 0
         self.focus = 0
         
-        # Initialize joystick if available
-        self._init_joystick()
+        # Lock for thread safety
+        self.lock = threading.Lock()
+        
+        # Try to connect to joystick
+        self._connect_joystick()
+        
+        # Start input thread
+        self.running = True
+        self.thread = threading.Thread(target=self._input_loop)
+        self.thread.daemon = True
+        self.thread.start()
     
-    def _init_joystick(self):
-        """Initialize the game controller"""
+    def _connect_joystick(self):
+        """Try to connect to the first available joystick"""
         try:
-            pygame.joystick.init()
             if pygame.joystick.get_count() > 0:
                 self.joystick = pygame.joystick.Joystick(0)
                 self.joystick.init()
-                self.joystick_connected = True
-                print("Controller connected:", self.joystick.get_name())
+                self.connected = True
+                self.error = None
+                print(f"Connected to joystick: {self.joystick.get_name()}")
             else:
-                print("No controllers found")
+                self.connected = False
+                self.error = "No joystick found"
+                print("No joystick found")
         except Exception as e:
-            print(f"Joystick error: {e}")
-            self.joystick_connected = False
-            print("Using keyboard controls")
+            self.connected = False
+            self.error = str(e)
+            print(f"Error connecting to joystick: {e}")
     
-    def process_events(self):
-        """Process input events and update positions"""
-        quit_requested = False
-        
-        # Process events
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                quit_requested = True
-            
-            # Keyboard controls
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_LEFT:
-                    self.horizontal = max(-1, self.horizontal - 0.1)
-                elif event.key == pygame.K_RIGHT:
-                    self.horizontal = min(1, self.horizontal + 0.1)
-                elif event.key == pygame.K_UP:
-                    self.vertical = max(-1, self.vertical - 0.1)
-                elif event.key == pygame.K_DOWN:
-                    self.vertical = min(1, self.vertical + 0.1)
-                elif event.key == pygame.K_a:
-                    self.focus = max(-1, self.focus - 0.1)
-                elif event.key == pygame.K_d:
-                    self.focus = min(1, self.focus + 0.1)
-        
-        # If joystick is connected, get values from it
-        if self.joystick_connected:
-            pygame.event.pump()  # Process joystick events
-            
-            # Get analog stick values
-            self.horizontal = self.joystick.get_axis(0)  # Left stick horizontal
-            self.vertical = self.joystick.get_axis(1)    # Left stick vertical
-            
-            # Use both triggers for bidirectional focus
-            left_trigger = self.joystick.get_axis(2)    # Left trigger
-            right_trigger = self.joystick.get_axis(5)   # Right trigger
-            
-            # Combine triggers: right focuses in, left focuses out
-            self.focus = right_trigger - left_trigger
-            self.focus = max(-1, min(1, self.focus))  # Clamp to -1,1
-            
-        return quit_requested
+    def _input_loop(self):
+        """Main input processing loop"""
+        while self.running:
+            try:
+                # Process pygame events
+                for event in pygame.event.get():
+                    if event.type == pygame.JOYAXISMOTION:
+                        with self.lock:
+                            # Map joystick axes to controls
+                            if event.axis == 0:  # Left stick X
+                                self.horizontal = event.value
+                            elif event.axis == 1:  # Left stick Y
+                                self.vertical = -event.value  # Invert Y axis
+                            elif event.axis == 3:  # Right stick X
+                                self.focus = event.value
+                
+                # Check joystick connection
+                if not self.connected and pygame.joystick.get_count() > 0:
+                    self._connect_joystick()
+                elif self.connected and pygame.joystick.get_count() == 0:
+                    self.connected = False
+                    self.error = "Joystick disconnected"
+                
+                time.sleep(0.01)  # Small delay to prevent CPU overuse
+                
+            except Exception as e:
+                self.error = str(e)
+                print(f"Error in input loop: {e}")
+                time.sleep(1)  # Longer delay on error
     
-    def get_control_values(self):
-        """Get the current control values"""
-        return {
-            'horizontal': self.horizontal,
-            'vertical': self.vertical,
-            'focus': self.focus
-        } 
+    def get_values(self):
+        """Get current joystick values"""
+        with self.lock:
+            return {
+                'horizontal': self.horizontal,
+                'vertical': self.vertical,
+                'focus': self.focus
+            }
+    
+    def get_status(self):
+        """Get the current status of the input manager"""
+        with self.lock:
+            return {
+                'connected': self.connected,
+                'error': self.error,
+                'values': self.get_values()
+            }
+    
+    def cleanup(self):
+        """Clean up resources"""
+        self.running = False
+        if self.thread.is_alive():
+            self.thread.join()
+        pygame.quit()
+        print("Input manager cleaned up") 

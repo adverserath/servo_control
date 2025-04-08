@@ -7,11 +7,12 @@ from dotenv import load_dotenv
 from config import RTSP_URL
 
 class WebCameraServer:
-    def __init__(self, servo_manager, camera_manager, port=8080):
+    def __init__(self, servo_manager, camera_manager, input_manager, port=8080):
         self.app = Flask(__name__, template_folder='templates')
         self.port = port
         self.servo_manager = servo_manager
         self.camera_manager = camera_manager
+        self.input_manager = input_manager
         
         # Ensure templates directory exists
         os.makedirs('templates', exist_ok=True)
@@ -124,6 +125,41 @@ class WebCameraServer:
             background-color: #f2dede;
             color: #a94442;
         }
+        .status-panel {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+        .status-item {
+            margin-bottom: 10px;
+            padding: 5px;
+            border-radius: 3px;
+        }
+        .status-item.connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status-item.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .status-item.warning {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .status-label {
+            font-weight: bold;
+        }
+        .status-value {
+            margin-left: 5px;
+        }
+        .status-error {
+            color: #dc3545;
+            font-style: italic;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
@@ -163,6 +199,27 @@ class WebCameraServer:
                 Camera status: Connecting...
             </div>
         </div>
+        
+        <div class="status-panel">
+            <h2>System Status</h2>
+            <div id="systemStatus">
+                <div class="status-item">
+                    <span class="status-label">Camera:</span>
+                    <span class="status-value" id="cameraStatus">Checking...</span>
+                    <div class="status-error" id="cameraError"></div>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Controller:</span>
+                    <span class="status-value" id="controllerStatus">Checking...</span>
+                    <div class="status-error" id="controllerError"></div>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Servos:</span>
+                    <span class="status-value" id="servoStatus">Checking...</span>
+                    <div class="status-error" id="servoError"></div>
+                </div>
+            </div>
+        </div>
     </div>
     
     <script>
@@ -176,6 +233,14 @@ class WebCameraServer:
         const statusEl = document.getElementById('status');
         const captureButton = document.getElementById('captureButton');
         const captureStatus = document.getElementById('captureStatus');
+        
+        // Status elements
+        const cameraStatus = document.getElementById('cameraStatus');
+        const cameraError = document.getElementById('cameraError');
+        const controllerStatus = document.getElementById('controllerStatus');
+        const controllerError = document.getElementById('controllerError');
+        const servoStatus = document.getElementById('servoStatus');
+        const servoError = document.getElementById('servoError');
         
         // Update servo position when sliders change
         horizontalSlider.addEventListener('input', updateValues);
@@ -267,10 +332,71 @@ class WebCameraServer:
                     
                     // Update capture button state
                     captureButton.disabled = !data.camera_connected;
+                    
+                    // Update system status
+                    updateSystemStatus(data);
                 })
                 .catch(error => {
                     console.error('Error:', error);
+                    // Show error in status
+                    statusEl.innerHTML = `Error connecting to server: ${error}`;
                 });
+        }
+        
+        // Update system status display
+        function updateSystemStatus(data) {
+            // Camera status
+            if (data.camera_status) {
+                const connected = data.camera_status.connected;
+                cameraStatus.textContent = connected ? 'Connected' : 'Disconnected';
+                cameraStatus.parentElement.className = 'status-item ' + 
+                    (connected ? 'connected' : 'disconnected');
+                
+                if (data.camera_status.camera_type) {
+                    cameraStatus.textContent += ` (${data.camera_status.camera_type})`;
+                }
+                
+                if (data.camera_status.error) {
+                    cameraError.textContent = data.camera_status.error;
+                    cameraError.style.display = 'block';
+                } else {
+                    cameraError.style.display = 'none';
+                }
+            }
+            
+            // Controller status
+            if (data.controller_status) {
+                const connected = data.controller_status.connected;
+                controllerStatus.textContent = connected ? 'Connected' : 'Disconnected';
+                controllerStatus.parentElement.className = 'status-item ' + 
+                    (connected ? 'connected' : 'disconnected');
+                
+                if (data.controller_status.controller_type) {
+                    controllerStatus.textContent += ` (${data.controller_status.controller_type})`;
+                }
+                
+                if (data.controller_status.error) {
+                    controllerError.textContent = data.controller_status.error;
+                    controllerError.style.display = 'block';
+                } else {
+                    controllerError.style.display = 'none';
+                }
+            }
+            
+            // Servo status
+            if (data.servo_status) {
+                const connected = data.servo_status.connected;
+                servoStatus.textContent = connected ? 'Connected' : 'Disconnected';
+                servoStatus.parentElement.className = 'status-item ' + 
+                    (connected ? 'connected' : 'disconnected');
+                
+                if (data.servo_status.error) {
+                    servoError.textContent = data.servo_status.error;
+                    servoError.style.display = 'block';
+                } else {
+                    servoError.style.display = 'none';
+                }
+            }
         }
         
         // Update status every 2 seconds
@@ -295,11 +421,38 @@ class WebCameraServer:
         
         @self.app.route('/api/status')
         def status():
+            # Get camera status
+            camera_status = self.camera_manager.get_status() if hasattr(self.camera_manager, 'get_status') else {
+                'connected': self.camera_manager.connected,
+                'camera_type': 'Unknown',
+                'error': None
+            }
+            
+            # Get controller status
+            controller_status = {
+                'connected': self.input_manager.joystick_connected,
+                'controller_type': 'Keyboard' if not self.input_manager.joystick_connected else 'Joystick',
+                'error': None
+            }
+            
+            # Get servo status
+            servo_status = {
+                'connected': True,  # Assume connected if no error
+                'error': None
+            }
+            
+            # Check if servo manager has error reporting
+            if hasattr(self.servo_manager, 'get_status'):
+                servo_status = self.servo_manager.get_status()
+            
             return jsonify({
-                'camera_connected': self.camera_manager.connected,
+                'camera_connected': camera_status['connected'],
                 'horizontal_pos': self.servo_manager.horizontal_pos,
                 'vertical_pos': self.servo_manager.vertical_pos,
-                'focus_pos': self.servo_manager.focus_pos
+                'focus_pos': self.servo_manager.focus_pos,
+                'camera_status': camera_status,
+                'controller_status': controller_status,
+                'servo_status': servo_status
             })
         
         @self.app.route('/api/control', methods=['POST'])
