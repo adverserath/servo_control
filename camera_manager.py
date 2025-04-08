@@ -365,16 +365,26 @@ class CameraManager:
     def _cleanup_camera_object(self):
          """Safely close/release the current camera object"""
          if self.camera:
-             print(f"Cleaning up {self.camera_type} object...")
+             camera_type_to_clean = self.camera_type # Store type before setting camera to None
+             print(f"Cleaning up {camera_type_to_clean} object...")
              try:
-                 if self.camera_type == "Raspberry Pi Camera" and picamera2_available:
+                 if camera_type_to_clean == "Raspberry Pi Camera" and picamera2_available:
                      self.camera.close() # Use close() for Picamera2
-                 elif self.camera_type == "Webcam":
+                     print("Pi Camera closed.")
+                 elif camera_type_to_clean == "Webcam":
                      self.camera.release() # Use release() for VideoCapture
+                     print("Webcam released.")
              except Exception as e:
                  print(f"Error during camera object cleanup: {e}")
              finally:
                  self.camera = None # Set to None regardless of cleanup success
+                 # --- Add Delay Here --- 
+                 print("Waiting briefly after camera cleanup...")
+                 time.sleep(0.5) # Give 0.5 seconds for resource release
+         else:
+             # If self.camera was already None, still wait a bit before potential init
+             # time.sleep(0.1) # Optional shorter delay if camera was already None
+             pass
 
     def cleanup(self):
         """Clean up all resources"""
