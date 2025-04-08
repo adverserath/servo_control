@@ -19,7 +19,10 @@ class ServoManager:
         self.focus_pos = 0
         
         # MG996R Power Pro specific settings
-        # Pulse width range: 500-2400 microseconds (0.5-2.4ms)
+        # NOTE: Ensure servos have a STABLE and SUFFICIENT power supply (e.g., 5V, >1A per servo),
+        # separate from the Raspberry Pi's logic power.
+        # NOTE: This pulse range (500-2400us) is typical for MG996R, but may need
+        # fine-tuning (+/- 100us) for your specific servos if jitter persists.
         self.min_pulse = 500  # microseconds
         self.max_pulse = 2400  # microseconds
         self.center_pulse = 1500  # microseconds
@@ -58,27 +61,42 @@ class ServoManager:
     def update_position(self, horizontal=None, vertical=None, focus=None):
         """Update servo positions"""
         try:
+            duty_changed = False
             if horizontal is not None:
-                self.horizontal_pos = max(-1, min(1, horizontal))
+                new_pos = max(-1, min(1, horizontal))
+                # Only update if the position changed significantly (optional threshold)
+                # if abs(new_pos - self.horizontal_pos) > 0.01:
+                self.horizontal_pos = new_pos
                 duty = self._value_to_duty(self.horizontal_pos)
                 self.horizontal_pwm.ChangeDutyCycle(duty)
+                duty_changed = True
                 if self.debug:
                     print(f"Horizontal: {self.horizontal_pos:.2f} -> Duty: {duty:.2f}%")
             
             if vertical is not None:
-                self.vertical_pos = max(-1, min(1, vertical))
+                new_pos = max(-1, min(1, vertical))
+                # if abs(new_pos - self.vertical_pos) > 0.01:
+                self.vertical_pos = new_pos
                 duty = self._value_to_duty(self.vertical_pos)
                 self.vertical_pwm.ChangeDutyCycle(duty)
+                duty_changed = True
                 if self.debug:
                     print(f"Vertical: {self.vertical_pos:.2f} -> Duty: {duty:.2f}%")
             
             if focus is not None:
-                self.focus_pos = max(-1, min(1, focus))
+                new_pos = max(-1, min(1, focus))
+                # if abs(new_pos - self.focus_pos) > 0.01:
+                self.focus_pos = new_pos
                 duty = self._value_to_duty(self.focus_pos)
                 self.focus_pwm.ChangeDutyCycle(duty)
+                duty_changed = True
                 if self.debug:
                     print(f"Focus: {self.focus_pos:.2f} -> Duty: {duty:.2f}%")
             
+            # If any duty cycle was changed, give a tiny pause for stability
+            if duty_changed:
+                time.sleep(0.005) # Small delay after changing duty cycle
+                
             self.error = None
             self.connected = True
             
