@@ -5,6 +5,14 @@ import cv2
 from flask import Flask, Response, render_template, request, jsonify
 from dotenv import load_dotenv
 
+# Handle XDG_RUNTIME_DIR issue on Raspberry Pi OS
+if not os.environ.get('XDG_RUNTIME_DIR'):
+    # Create runtime directory in user's home directory
+    home_dir = os.path.expanduser('~')
+    runtime_dir = os.path.join(home_dir, '.runtime')
+    os.makedirs(runtime_dir, exist_ok=True)
+    os.environ['XDG_RUNTIME_DIR'] = runtime_dir
+
 class WebCameraServer:
     def __init__(self, servo_manager, camera_manager, input_manager, port=8080):
         self.app = Flask(__name__, template_folder='templates')

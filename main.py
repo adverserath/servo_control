@@ -1,12 +1,21 @@
 import pygame
 import time
 import sys
+import os
 from config import FRAME_RATE
 from servo_manager import ServoManager
 from camera_manager import CameraManager
 from input_manager import InputManager
 from display_manager import DisplayManager
 from web_camera import WebCameraServer
+
+# Handle XDG_RUNTIME_DIR issue on Raspberry Pi OS
+if not os.environ.get('XDG_RUNTIME_DIR'):
+    # Create runtime directory in user's home directory
+    home_dir = os.path.expanduser('~')
+    runtime_dir = os.path.join(home_dir, '.runtime')
+    os.makedirs(runtime_dir, exist_ok=True)
+    os.environ['XDG_RUNTIME_DIR'] = runtime_dir
 
 def main():
     """Main entry point for the servo camera application"""

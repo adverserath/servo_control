@@ -10,9 +10,9 @@ from config import HORIZONTAL_PIN, VERTICAL_PIN, FOCUS_PIN, PWM_FREQ
 
 # Handle XDG_RUNTIME_DIR issue on Raspberry Pi OS
 if not os.environ.get('XDG_RUNTIME_DIR'):
-    # Create runtime directory in /run/user/$(id -u)
-    user_id = os.getuid()
-    runtime_dir = f'/run/user/{user_id}'
+    # Create runtime directory in user's home directory
+    home_dir = os.path.expanduser('~')
+    runtime_dir = os.path.join(home_dir, '.runtime')
     os.makedirs(runtime_dir, exist_ok=True)
     os.environ['XDG_RUNTIME_DIR'] = runtime_dir
 
