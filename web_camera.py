@@ -449,9 +449,9 @@ class WebCameraServer:
             
             # Get controller status
             controller_status = {
-                'connected': self.input_manager.joystick_connected,
-                'controller_type': 'Keyboard' if not self.input_manager.joystick_connected else 'Joystick',
-                'error': None
+                'connected': self.input_manager.connected,
+                'controller_type': 'Keyboard' if not self.input_manager.connected else 'Joystick',
+                'error': self.input_manager.error
             }
             
             # Get servo status

@@ -33,6 +33,10 @@ class InputManager:
         self.thread = threading.Thread(target=self._input_loop)
         self.thread.daemon = True
         self.thread.start()
+        
+        # Initialize display for pygame events
+        pygame.display.init()
+        pygame.display.set_mode((1, 1), pygame.HIDDEN)
     
     def _connect_joystick(self):
         """Try to connect to the first available joystick"""
@@ -82,8 +86,25 @@ class InputManager:
                 print(f"Error in input loop: {e}")
                 time.sleep(1)  # Longer delay on error
     
-    def get_values(self):
-        """Get current joystick values"""
+    def process_events(self):
+        """Process pygame events and return True if quit requested"""
+        quit_requested = False
+        with self.lock:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    quit_requested = True
+                elif event.type == pygame.JOYAXISMOTION:
+                    # Map joystick axes to controls
+                    if event.axis == 0:  # Left stick X
+                        self.horizontal = event.value
+                    elif event.axis == 1:  # Left stick Y
+                        self.vertical = -event.value  # Invert Y axis
+                    elif event.axis == 3:  # Right stick X
+                        self.focus = event.value
+        return quit_requested
+    
+    def get_control_values(self):
+        """Get current control values"""
         with self.lock:
             return {
                 'horizontal': self.horizontal,
@@ -97,7 +118,7 @@ class InputManager:
             return {
                 'connected': self.connected,
                 'error': self.error,
-                'values': self.get_values()
+                'values': self.get_control_values()
             }
     
     def cleanup(self):
