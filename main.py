@@ -19,6 +19,7 @@ if not os.environ.get('XDG_RUNTIME_DIR'):
 
 def main():
     """Main entry point for the servo camera application"""
+    web_server = None
     try:
         # Initialize pygame if not already initialized
         if not pygame.get_init():
@@ -79,6 +80,8 @@ def main():
         print(f"Error: {e}")
     finally:
         # Clean up resources
+        if web_server:
+            web_server.stop()
         servo_manager.cleanup()
         pygame.quit()
         print("Program terminated")
