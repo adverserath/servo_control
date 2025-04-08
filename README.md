@@ -88,18 +88,7 @@ The servo controller now includes integration with an RTSP camera stream. This a
 
 ### Setting Up the RTSP Stream
 
-1. Update the `.env` file with your camera's RTSP URL:
-   ```
-   RTSP_URL=rtsp://username:password@camera-ip-address:port/stream
-   ```
-   
-   Example formats for common cameras:
-   - Generic: `rtsp://username:password@192.168.1.100:554/stream1`
-   - Hikvision: `rtsp://username:password@192.168.1.100:554/h264/ch1/main/av_stream`
-   - Dahua: `rtsp://username:password@192.168.1.100:554/cam/realmonitor?channel=1&subtype=0`
-   - Axis: `rtsp://username:password@192.168.1.100:554/axis-media/media.amp`
-
-2. Install the required dependencies:
+1. Install the required dependencies:
    ```
    pip install -r requirements.txt
    ```

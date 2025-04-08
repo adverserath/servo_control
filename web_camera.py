@@ -4,7 +4,6 @@ import os
 import cv2
 from flask import Flask, Response, render_template, request, jsonify
 from dotenv import load_dotenv
-from config import RTSP_URL
 
 class WebCameraServer:
     def __init__(self, servo_manager, camera_manager, input_manager, port=8080):
