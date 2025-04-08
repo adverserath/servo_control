@@ -37,7 +37,7 @@ pygame.init()
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption("Servo Controller with Pi Camera")
+pygame.display.set_caption("Servo Controller")
 
 # Font for displaying information
 font = pygame.font.Font(None, 36)
@@ -63,30 +63,32 @@ def map_to_pwm(value):
     # Map the joystick range (-1 to 1) to PWM range (0 to 100)
     return (value + 1) * 50  # PWM duty cycle is between 0 and 100
 
-# Function to capture frames from the Pi camera
+# Function to capture frames from the camera
 def camera_stream_thread():
     global frame, camera_connected
     
     try:
-        # Initialize Pi camera
-        import picamera
-        import picamera.array
+        # Initialize camera
+        cap = cv2.VideoCapture(0)  # Use default camera
+        if not cap.isOpened():
+            print("Cannot open camera")
+            return
+            
+        camera_connected = True
+        print("Camera connected")
         
-        with picamera.PiCamera() as camera:
-            camera.resolution = (SCREEN_WIDTH, SCREEN_HEIGHT)
-            camera.framerate = 30
+        while True:
+            ret, new_frame = cap.read()
+            if not ret:
+                print("Failed to get frame")
+                break
+                
+            with frame_lock:
+                # Convert to RGB for Pygame
+                frame = cv2.cvtColor(new_frame, cv2.COLOR_BGR2RGB)
+                frame = cv2.resize(frame, (SCREEN_WIDTH, SCREEN_HEIGHT))
             
-            # Create a numpy array to store the frame
-            output = picamera.array.PiRGBArray(camera, size=(SCREEN_WIDTH, SCREEN_HEIGHT))
-            
-            camera_connected = True
-            print("Pi camera connected")
-            
-            for frame_array in camera.capture_continuous(output, format='rgb', use_video_port=True):
-                with frame_lock:
-                    frame = frame_array.array
-                output.truncate(0)
-                time.sleep(0.033)  # ~30fps
+            time.sleep(0.033)  # ~30fps
                 
     except Exception as e:
         print(f"Camera Error: {e}")
