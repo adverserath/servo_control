@@ -54,74 +54,85 @@ class CameraManager:
         self.thread.start()
         
     def _camera_thread(self):
-        """Background thread to initialize and capture frames"""
-        retry_delay = 5
+        """Background thread to initialize camera ONCE and then capture frames"""
+        print("Camera thread started. Attempting initialization...")
+        
+        # --- Determine Camera Type and Initialize ONCE --- 
+        initialization_success = False
+        try:
+            use_pi_camera = IS_RASPBERRY_PI and picamera2_available
+            if use_pi_camera:
+                print("Attempting Pi Camera initialization...")
+                self._init_pi_camera() # This sets self.connected, self.error
+            else:
+                if not IS_RASPBERRY_PI:
+                     print("Not on Raspberry Pi, trying webcam...")
+                elif not picamera2_available:
+                     print("Picamera2 library not available/functional, trying webcam...")
+                self._init_webcam() # This sets self.connected, self.error
+            
+            initialization_success = self.connected
+        except Exception as e:
+             # Catch errors during the init selection itself
+             print(f"Critical error during camera type selection/init call: {e}")
+             self.error = str(e)
+             self.connected = False
+             initialization_success = False
+        # --- End Initialization Attempt ---
+
+        if not initialization_success:
+            print(f"Camera initialization failed: {self.error}. Camera thread exiting.")
+            self._cleanup_camera_object() # Clean up if init failed
+            return # Exit the thread
+
+        print(f"Camera thread: {self.camera_type} initialized successfully. Entering capture loop.")
+        
+        # --- Capture Loop (Only runs if init succeeded) ---
         while self.running:
+            if not self.connected or self.camera is None:
+                # Should not happen if init succeeded, but safety check
+                print("Camera became disconnected unexpectedly. Camera thread exiting.")
+                self.error = "Camera disconnected unexpectedly."
+                break # Exit capture loop
+                
             try:
-                if not self.connected or self.camera is None:
-                    print("Camera not initialized. Attempting...")
+                frame_data = self._capture_frame()
+                if frame_data is not None:
+                    with self.frame_lock:
+                        self.frame = frame_data
+                    # No need to clear error here, should be None if we got here
                     
-                    # --- Determine Camera Type and Initialize ---
-                    use_pi_camera = IS_RASPBERRY_PI and picamera2_available
-                    
-                    if use_pi_camera:
-                        print("Attempting Pi Camera initialization...")
-                        self._init_pi_camera()
-                    else:
-                        if not IS_RASPBERRY_PI:
-                             print("Not on Raspberry Pi, trying webcam...")
-                        elif not picamera2_available:
-                             print("Picamera2 library not available/functional, trying webcam...")
-                        self._init_webcam()
-                    # --- End Initialization ---
-                        
-                    if not self.connected:
-                         print(f"Initialization failed: {self.error}. Retrying in {retry_delay}s...")
-                         self._cleanup_camera_object() # Ensure cleanup before retry
-                         time.sleep(retry_delay)
-                         continue # Retry initialization
+                    # Write frame if recording
+                    with self.recording_lock:
+                        if self.is_recording and self.video_writer:
+                            # Ensure frame is in BGR format for VideoWriter
+                            if self.camera_type == "Raspberry Pi Camera":
+                                # Picamera2 captures in RGB, convert to BGR
+                                bgr_frame = cv2.cvtColor(frame_data, cv2.COLOR_RGB2BGR)
+                                self.video_writer.write(bgr_frame)
+                            else: # Webcam likely BGR already from OpenCV
+                                self.video_writer.write(frame_data)
+                else:
+                     # Failed to capture frame - exit loop
+                     print(f"Failed to capture frame using {self.camera_type}. Camera thread exiting.")
+                     self.error = "Failed to capture frame."
+                     break # Exit capture loop
                 
-                # If connected, capture frame
-                if self.connected and self.camera is not None:
-                    frame_data = self._capture_frame()
-                    if frame_data is not None:
-                        with self.frame_lock:
-                            self.frame = frame_data
-                        self.error = None # Clear error on successful frame
-                        
-                        # Write frame if recording
-                        with self.recording_lock:
-                            if self.is_recording and self.video_writer:
-                                # Ensure frame is in BGR format for VideoWriter
-                                if self.camera_type == "Raspberry Pi Camera":
-                                    # Picamera2 captures in RGB, convert to BGR
-                                    bgr_frame = cv2.cvtColor(frame_data, cv2.COLOR_RGB2BGR)
-                                    self.video_writer.write(bgr_frame)
-                                else: # Webcam likely BGR already from OpenCV
-                                    self.video_writer.write(frame_data)
-                    else:
-                         # Failed to capture frame
-                         print(f"Failed to capture frame using {self.camera_type}. Attempting reinitialization...")
-                         self.error = "Failed to capture frame."
-                         if self.camera_type == "Webcam":
-                              print("Hint: Check webcam permissions (e.g., /dev/video0) or if another app is using it.")
-                         self._cleanup_camera_object() # Clean up existing camera before retry
-                         self.connected = False
-                         # No need to sleep here, loop will retry initialization immediately
-                
-                # Adjust sleep time based on whether we are connected
-                sleep_duration = (1.0 / FRAME_RATE) if self.connected else retry_delay / 2.0
-                time.sleep(sleep_duration) 
+                # Frame rate handled by sleep
+                time.sleep(max(0.001, 1.0 / FRAME_RATE)) 
                     
             except Exception as e:
-                print(f"Critical Camera Error in _camera_thread: {e}")
+                print(f"Critical Camera Error during capture: {e}")
                 import traceback
                 traceback.print_exc()
                 self.error = str(e)
-                self._cleanup_camera_object()
-                self.connected = False
-                print(f"Retrying connection in {retry_delay}s...")
-                time.sleep(retry_delay)
+                break # Exit capture loop on error
+        # --- End Capture Loop ---
+        
+        print("Camera thread loop finished. Cleaning up...")
+        self._cleanup_camera_object() # Ensure cleanup when thread exits
+        self.connected = False # Mark as disconnected
+        print("Camera thread finished cleanup.")
 
     def _init_pi_camera(self):
         """Initialize the Raspberry Pi camera using picamera2"""
