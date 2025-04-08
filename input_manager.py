@@ -41,12 +41,22 @@ class InputManager:
         self.connected = False
         self.error = None
         
-        # Joystick values
+        # Control values (mapped)
         self.horizontal = 0
         self.vertical = 0
         self.focus = 0
-        self._left_trigger = 0  # Store trigger values separately
-        self._right_trigger = 0
+        
+        # Raw trigger/axis values for status display
+        self.raw_axis_h = 0.0
+        self.raw_axis_v = 0.0
+        self.raw_axis_lt = -1.0 # Triggers often idle at -1
+        self.raw_axis_rt = -1.0
+        self._left_trigger = 0  # Normalized (0 to 1)
+        self._right_trigger = 0 # Normalized (0 to 1)
+
+        # Button states for status display
+        self.button_states = {}
+        self.monitored_buttons = {0, 3} # Cross, Square
         
         # Request flags
         self.capture_requested = False
@@ -65,7 +75,7 @@ class InputManager:
         self.thread.start()
     
     def _connect_joystick(self):
-        """Try to connect to the first available joystick"""
+        """Try to connect to the first available joystick and init button states"""
         try:
             if pygame.joystick.get_init():  # Check if joystick system is initialized
                 joystick_count = pygame.joystick.get_count()
@@ -85,6 +95,12 @@ class InputManager:
                         print(f"Number of axes: {self.joystick.get_numaxes()}")
                         print(f"Number of buttons: {self.joystick.get_numbuttons()}")
                         print(f"Number of hats: {self.joystick.get_numhats()}")
+                    
+                    # Initialize button states
+                    num_buttons = self.joystick.get_numbuttons()
+                    self.button_states = {i: False for i in range(num_buttons)}
+                    if self.debug:
+                        print(f"Initialized {num_buttons} button states.")
                 else:
                     self.connected = False
                     self.error = "No joystick found"
@@ -133,10 +149,9 @@ class InputManager:
                 time.sleep(1)  # Longer delay on error
     
     def process_events(self):
-        """Process pygame events and return True if quit requested"""
+        """Process pygame events and update raw/mapped values"""
         quit_requested = False
         with self.lock:
-            # Reset request flags at the start of processing
             self.capture_requested = False
             self.toggle_recording_requested = False
             
@@ -145,42 +160,39 @@ class InputManager:
                     quit_requested = True
                     
                 elif event.type == pygame.JOYAXISMOTION and self.connected:
-                    # Map joystick axes to controls
-                    # Axis mapping might need adjustment based on controller
+                    # Store raw values
+                    if event.axis == 2: self.raw_axis_h = event.value
+                    elif event.axis == 3: self.raw_axis_v = event.value
+                    elif event.axis == 4: self.raw_axis_lt = event.value
+                    elif event.axis == 5: self.raw_axis_rt = event.value
+                    
+                    # Map to control values
                     if event.axis == 2:  # Right stick X (Horizontal)
                         self.horizontal = event.value
-                        if self.debug: print(f"Joystick axis 2 (H): {event.value:.2f}")
                     elif event.axis == 3:  # Right stick Y (Vertical)
-                        self.vertical = -event.value  # Invert Y axis
-                        if self.debug: print(f"Joystick axis 3 (V): {event.value:.2f} -> {self.vertical:.2f}")
-                    elif event.axis == 4: # Left Trigger (often -1 to 1)
-                         # Map trigger from (-1 to 1) to (0 to 1)
+                        self.vertical = -event.value
+                    elif event.axis == 4: # Left Trigger
                         self._left_trigger = (event.value + 1) / 2
-                        if self.debug: print(f"Joystick axis 4 (L Trig): {event.value:.2f} -> {self._left_trigger:.2f}")
-                    elif event.axis == 5: # Right Trigger (often -1 to 1)
-                        # Map trigger from (-1 to 1) to (0 to 1)
+                    elif event.axis == 5: # Right Trigger
                         self._right_trigger = (event.value + 1) / 2
-                        if self.debug: print(f"Joystick axis 5 (R Trig): {event.value:.2f} -> {self._right_trigger:.2f}")
 
-                    # Combine triggers for focus control (-1 to 1)
+                    # Combine triggers for focus
                     self.focus = self._right_trigger - self._left_trigger
-                    # Optional: Add deadzone for focus if needed
-                    # focus_deadzone = 0.1
-                    # if abs(self.focus) < focus_deadzone:
-                    #     self.focus = 0
                         
                 elif event.type == pygame.JOYBUTTONDOWN and self.connected:
-                    if self.debug: print(f"Joystick button {event.button} pressed")
-                    # Button mapping might need adjustment
+                    # Store button state
+                    if event.button in self.button_states:
+                        self.button_states[event.button] = True
+                    # Handle actions
                     if event.button == 0:  # Cross Button (X)
                         self.capture_requested = True
-                        if self.debug: print("Capture requested (Button 0)")
                     elif event.button == 3:  # Square Button
                         self.toggle_recording_requested = True
-                        if self.debug: print("Toggle recording requested (Button 3)")
                         
-                # Optional: Add JOYHATMOTION or JOYBUTTONUP if needed
-
+                elif event.type == pygame.JOYBUTTONUP and self.connected:
+                     # Store button state
+                     if event.button in self.button_states:
+                         self.button_states[event.button] = False
         return quit_requested
     
     def check_capture_request(self):
@@ -201,12 +213,23 @@ class InputManager:
             }
     
     def get_status(self):
-        """Get the current status of the input manager"""
+        """Get the current status including raw input values"""
         with self.lock:
+            # Get states of monitored buttons only
+            monitored_button_status = {btn: self.button_states.get(btn, False) 
+                                       for btn in self.monitored_buttons if btn in self.button_states}
+            raw_values = {
+                 'axis_h': self.raw_axis_h,
+                 'axis_v': self.raw_axis_v,
+                 'axis_lt': self.raw_axis_lt,
+                 'axis_rt': self.raw_axis_rt,
+                 'buttons': monitored_button_status
+            }
             return {
                 'connected': self.connected,
                 'error': self.error,
-                'values': self.get_control_values()
+                'mapped_values': self.get_control_values(), # Mapped H, V, Focus
+                'raw_values': raw_values # Raw axis/button states
             }
     
     def cleanup(self):

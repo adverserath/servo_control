@@ -49,7 +49,7 @@ class WebCameraServer:
             pygame.joystick.init()
         
     def _create_template_if_missing(self):
-        """Create/Update the index.html template with capture display"""
+        """Create/Update the index.html template with capture display and controller status"""
         template_path = os.path.join('templates', 'index.html')
         
         # Updated HTML content
@@ -286,6 +286,14 @@ class WebCameraServer:
                     <span class="status-label">Controller:</span>
                     <span class="status-value" id="controllerStatus">Checking...</span>
                     <div class="status-error" id="controllerError"></div>
+                    <div id="controllerRawValues" class="hidden" style="font-size: 0.9em; margin-top: 5px; padding-left: 10px; border-left: 2px solid #eee;">
+                        Raw Axis H: <span id="rawAxisH">0.00</span> | 
+                        Raw Axis V: <span id="rawAxisV">0.00</span> | 
+                        Raw LT: <span id="rawAxisLT">-1.00</span> | 
+                        Raw RT: <span id="rawAxisRT">-1.00</span> <br>
+                        Button 0 (X): <span id="rawButton0">OFF</span> | 
+                        Button 3 (Sq): <span id="rawButton3">OFF</span>
+                    </div>
                 </div>
                 <div class="status-item">
                     <span class="status-label">Servos:</span>
@@ -326,6 +334,13 @@ class WebCameraServer:
         const controllerError = document.getElementById('controllerError');
         const servoStatus = document.getElementById('servoStatus');
         const servoError = document.getElementById('servoError');
+        const controllerRawValuesEl = document.getElementById('controllerRawValues');
+        const rawAxisHEl = document.getElementById('rawAxisH');
+        const rawAxisVEl = document.getElementById('rawAxisV');
+        const rawAxisLTEl = document.getElementById('rawAxisLT');
+        const rawAxisRTEl = document.getElementById('rawAxisRT');
+        const rawButton0El = document.getElementById('rawButton0');
+        const rawButton3El = document.getElementById('rawButton3');
         
         // Update servo position when sliders change
         horizontalSlider.addEventListener('input', updateValues);
@@ -483,8 +498,7 @@ class WebCameraServer:
                     recordButton.disabled = !data.camera_connected; // Can't record if not connected
                 })
                 .catch(error => {
-                    console.error('Error:', error);
-                    // Show error in status
+                    console.error('Error fetching status:', error);
                     statusEl.innerHTML = `Error connecting to server: ${error}`;
                 });
         }
@@ -521,11 +535,24 @@ class WebCameraServer:
                 controllerStatus.textContent = connected ? 'Connected' : 'Disconnected';
                 controllerStatus.parentElement.className = 'status-item ' + 
                     (connected ? 'connected' : 'disconnected');
-                
-                if (data.controller_status.controller_type) {
-                    controllerStatus.textContent += ` (${data.controller_status.controller_type})`;
+                controllerRawValuesEl.classList.toggle('hidden', !connected);
+
+                if (connected) {
+                     controllerStatus.textContent += ` (${data.controller_status.controller_type})`;
+                     // Display raw values if available
+                     if (data.controller_status.raw_values) {
+                         const raw = data.controller_status.raw_values;
+                         rawAxisHEl.textContent = raw.axis_h !== undefined ? raw.axis_h.toFixed(2) : 'N/A';
+                         rawAxisVEl.textContent = raw.axis_v !== undefined ? raw.axis_v.toFixed(2) : 'N/A';
+                         rawAxisLTEl.textContent = raw.axis_lt !== undefined ? raw.axis_lt.toFixed(2) : 'N/A';
+                         rawAxisRTEl.textContent = raw.axis_rt !== undefined ? raw.axis_rt.toFixed(2) : 'N/A';
+                         if (raw.buttons) {
+                             rawButton0El.textContent = raw.buttons['0'] ? 'ON' : 'OFF';
+                             rawButton3El.textContent = raw.buttons['3'] ? 'ON' : 'OFF';
+                         }
+                     }
                 }
-                
+
                 if (data.controller_status.error) {
                     controllerError.textContent = data.controller_status.error;
                     controllerError.style.display = 'block';
@@ -586,28 +613,16 @@ class WebCameraServer:
         @self.app.route('/api/status')
         def status():
             # Get camera status
-            camera_status = self.camera_manager.get_status() if hasattr(self.camera_manager, 'get_status') else {
-                'connected': self.camera_manager.connected,
-                'camera_type': 'Unknown',
-                'error': None
-            }
+            camera_status = self.camera_manager.get_status() # Already includes recording
             
-            # Get controller status
-            controller_status = {
-                'connected': self.input_manager.connected,
-                'controller_type': 'Keyboard' if not self.input_manager.connected else 'Joystick',
-                'error': self.input_manager.error
-            }
-            
+            # Get controller status (now includes raw values)
+            controller_status = self.input_manager.get_status() 
+            # Add controller type for convenience if not already in get_status
+            if 'controller_type' not in controller_status:
+                controller_status['controller_type'] = 'Keyboard' if not controller_status['connected'] else 'Joystick'
+
             # Get servo status
-            servo_status = {
-                'connected': True,  # Assume connected if no error
-                'error': None
-            }
-            
-            # Check if servo manager has error reporting
-            if hasattr(self.servo_manager, 'get_status'):
-                servo_status = self.servo_manager.get_status()
+            servo_status = self.servo_manager.get_status()
             
             return jsonify({
                 'camera_connected': camera_status['connected'],
@@ -615,7 +630,7 @@ class WebCameraServer:
                 'vertical_pos': self.servo_manager.vertical_pos,
                 'focus_pos': self.servo_manager.focus_pos,
                 'camera_status': camera_status,
-                'controller_status': controller_status,
+                'controller_status': controller_status, # Now has raw_values
                 'servo_status': servo_status
             })
         

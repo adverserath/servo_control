@@ -18,6 +18,12 @@ class ServoManager:
         self.vertical_pos = 0
         self.focus_pos = 0
         
+        # Store last sent duty cycles to reduce redundant updates
+        self.last_horizontal_duty = -1.0
+        self.last_vertical_duty = -1.0
+        self.last_focus_duty = -1.0
+        self.duty_update_threshold = 0.05 # Only update if duty cycle changes by this much %
+        
         # MG996R Power Pro specific settings
         # NOTE: Ensure servos have a STABLE and SUFFICIENT power supply (e.g., 5V, >1A per servo),
         # separate from the Raspberry Pi's logic power.
@@ -51,51 +57,62 @@ class ServoManager:
         self.focus_pwm = GPIO.PWM(FOCUS_PIN, PWM_FREQ)
         
         # Start PWM with center position
-        self.horizontal_pwm.start(self._pulse_to_duty(self.center_pulse))
-        self.vertical_pwm.start(self._pulse_to_duty(self.center_pulse))
-        self.focus_pwm.start(self._pulse_to_duty(self.center_pulse))
+        center_duty = self._pulse_to_duty(self.center_pulse)
+        self.horizontal_pwm.start(center_duty)
+        self.vertical_pwm.start(center_duty)
+        self.focus_pwm.start(center_duty)
+        self.last_horizontal_duty = center_duty
+        self.last_vertical_duty = center_duty
+        self.last_focus_duty = center_duty
         
         # Give servos time to reach center position
         time.sleep(1)
     
     def update_position(self, horizontal=None, vertical=None, focus=None):
-        """Update servo positions"""
+        """Update servo positions, only sending command if duty cycle changes significantly"""
         try:
             duty_changed = False
+            
+            # Horizontal
             if horizontal is not None:
                 new_pos = max(-1, min(1, horizontal))
-                # Only update if the position changed significantly (optional threshold)
-                # if abs(new_pos - self.horizontal_pos) > 0.01:
-                self.horizontal_pos = new_pos
-                duty = self._value_to_duty(self.horizontal_pos)
-                self.horizontal_pwm.ChangeDutyCycle(duty)
-                duty_changed = True
-                if self.debug:
-                    print(f"Horizontal: {self.horizontal_pos:.2f} -> Duty: {duty:.2f}%")
+                self.horizontal_pos = new_pos # Update internal state regardless
+                new_duty = self._value_to_duty(self.horizontal_pos)
+                # Check if duty cycle changed enough
+                if abs(new_duty - self.last_horizontal_duty) > self.duty_update_threshold:
+                    self.horizontal_pwm.ChangeDutyCycle(new_duty)
+                    self.last_horizontal_duty = new_duty
+                    duty_changed = True
+                    if self.debug:
+                        print(f"Horizontal Update: {self.horizontal_pos:.2f} -> Duty: {new_duty:.2f}%")
             
+            # Vertical
             if vertical is not None:
                 new_pos = max(-1, min(1, vertical))
-                # if abs(new_pos - self.vertical_pos) > 0.01:
                 self.vertical_pos = new_pos
-                duty = self._value_to_duty(self.vertical_pos)
-                self.vertical_pwm.ChangeDutyCycle(duty)
-                duty_changed = True
-                if self.debug:
-                    print(f"Vertical: {self.vertical_pos:.2f} -> Duty: {duty:.2f}%")
-            
+                new_duty = self._value_to_duty(self.vertical_pos)
+                if abs(new_duty - self.last_vertical_duty) > self.duty_update_threshold:
+                    self.vertical_pwm.ChangeDutyCycle(new_duty)
+                    self.last_vertical_duty = new_duty
+                    duty_changed = True
+                    if self.debug:
+                        print(f"Vertical Update: {self.vertical_pos:.2f} -> Duty: {new_duty:.2f}%")
+
+            # Focus
             if focus is not None:
                 new_pos = max(-1, min(1, focus))
-                # if abs(new_pos - self.focus_pos) > 0.01:
                 self.focus_pos = new_pos
-                duty = self._value_to_duty(self.focus_pos)
-                self.focus_pwm.ChangeDutyCycle(duty)
-                duty_changed = True
-                if self.debug:
-                    print(f"Focus: {self.focus_pos:.2f} -> Duty: {duty:.2f}%")
-            
-            # If any duty cycle was changed, give a tiny pause for stability
-            if duty_changed:
-                time.sleep(0.005) # Small delay after changing duty cycle
+                new_duty = self._value_to_duty(self.focus_pos)
+                if abs(new_duty - self.last_focus_duty) > self.duty_update_threshold:
+                    self.focus_pwm.ChangeDutyCycle(new_duty)
+                    self.last_focus_duty = new_duty
+                    duty_changed = True
+                    if self.debug:
+                        print(f"Focus Update: {self.focus_pos:.2f} -> Duty: {new_duty:.2f}%")
+
+            # If any duty cycle was changed, give a tiny pause for stability (optional)
+            # if duty_changed:
+            #     time.sleep(0.005)
                 
             self.error = None
             self.connected = True
