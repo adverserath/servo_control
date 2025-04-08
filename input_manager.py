@@ -5,22 +5,33 @@ import os
 
 class InputManager:
     def __init__(self):
+        # Debug flag
+        self.debug = True
+        
         # Initialize pygame if not already initialized
         if not pygame.get_init():
             pygame.init()
+            if self.debug:
+                print("Pygame initialized")
         
         # Initialize display before joystick to ensure video system is initialized
         if not pygame.display.get_init():
             # Set SDL_VIDEODRIVER to dummy if on headless system
             if not os.environ.get('DISPLAY') and not os.environ.get('WAYLAND_DISPLAY'):
                 os.environ['SDL_VIDEODRIVER'] = 'dummy'
+                if self.debug:
+                    print("Using dummy video driver for headless system")
             pygame.display.init()
             pygame.display.set_mode((1, 1), pygame.HIDDEN)
+            if self.debug:
+                print("Display initialized")
         
         # Initialize joystick module if not already initialized
         try:
             if not pygame.joystick.get_init():
                 pygame.joystick.init()
+                if self.debug:
+                    print("Joystick module initialized")
         except pygame.error as e:
             print(f"Error initializing joystick module: {e}")
             self.error = str(e)
@@ -51,12 +62,23 @@ class InputManager:
         """Try to connect to the first available joystick"""
         try:
             if pygame.joystick.get_init():  # Check if joystick system is initialized
-                if pygame.joystick.get_count() > 0:
+                joystick_count = pygame.joystick.get_count()
+                if self.debug:
+                    print(f"Found {joystick_count} joystick(s)")
+                
+                if joystick_count > 0:
                     self.joystick = pygame.joystick.Joystick(0)
                     self.joystick.init()
                     self.connected = True
                     self.error = None
-                    print(f"Connected to joystick: {self.joystick.get_name()}")
+                    
+                    # Print joystick information
+                    if self.debug:
+                        print(f"Connected to joystick: {self.joystick.get_name()}")
+                        print(f"Joystick ID: {self.joystick.get_id()}")
+                        print(f"Number of axes: {self.joystick.get_numaxes()}")
+                        print(f"Number of buttons: {self.joystick.get_numbuttons()}")
+                        print(f"Number of hats: {self.joystick.get_numhats()}")
                 else:
                     self.connected = False
                     self.error = "No joystick found"
@@ -81,9 +103,13 @@ class InputManager:
                     elif self.connected and pygame.joystick.get_count() == 0:
                         self.connected = False
                         self.error = "Joystick disconnected"
+                        if self.debug:
+                            print("Joystick disconnected")
                     
                     # Process events in the main loop
-                    self.process_events()
+                    quit_requested = self.process_events()
+                    if quit_requested:
+                        self.running = False
                 else:
                     # Try to initialize joystick system if it's not initialized
                     try:
@@ -111,10 +137,22 @@ class InputManager:
                     # Map joystick axes to controls
                     if event.axis == 0:  # Left stick X
                         self.horizontal = event.value
+                        if self.debug:
+                            print(f"Joystick axis 0 (X): {event.value:.2f}")
                     elif event.axis == 1:  # Left stick Y
                         self.vertical = -event.value  # Invert Y axis
+                        if self.debug:
+                            print(f"Joystick axis 1 (Y): {event.value:.2f} -> {self.vertical:.2f}")
                     elif event.axis == 3:  # Right stick X
                         self.focus = event.value
+                        if self.debug:
+                            print(f"Joystick axis 3 (Focus): {event.value:.2f}")
+                elif event.type == pygame.JOYBUTTONDOWN and self.connected:
+                    if self.debug:
+                        print(f"Joystick button {event.button} pressed")
+                elif event.type == pygame.JOYBUTTONUP and self.connected:
+                    if self.debug:
+                        print(f"Joystick button {event.button} released")
         return quit_requested
     
     def get_control_values(self):

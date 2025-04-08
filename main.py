@@ -21,17 +21,28 @@ def main():
     """Main entry point for the servo camera application"""
     web_server = None
     try:
+        print("Starting Servo Camera Controller...")
+        
         # Initialize pygame if not already initialized
         if not pygame.get_init():
             pygame.init()
+            print("Pygame initialized")
         
         # Initialize managers
+        print("Initializing servo manager...")
         servo_manager = ServoManager()
+        
+        print("Initializing camera manager...")
         camera_manager = CameraManager()
+        
+        print("Initializing input manager...")
         input_manager = InputManager()
+        
+        print("Initializing display manager...")
         display_manager = DisplayManager()
         
         # Start web server
+        print("Starting web server...")
         web_server = WebCameraServer(servo_manager, camera_manager, input_manager)
         web_server.start()
         
@@ -45,9 +56,14 @@ def main():
             quit_requested = input_manager.process_events()
             if quit_requested:
                 running = False
+                print("Quit requested")
             
             # Get control values
             controls = input_manager.get_control_values()
+            
+            # Debug output for control values
+            if controls['horizontal'] != 0 or controls['vertical'] != 0 or controls['focus'] != 0:
+                print(f"Control values: H={controls['horizontal']:.2f}, V={controls['vertical']:.2f}, F={controls['focus']:.2f}")
             
             # Update servo positions
             servo_manager.update_position(
@@ -78,8 +94,11 @@ def main():
         print("\nProgram interrupted by user")
     except Exception as e:
         print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         # Clean up resources
+        print("Cleaning up resources...")
         if web_server:
             web_server.stop()
         servo_manager.cleanup()
