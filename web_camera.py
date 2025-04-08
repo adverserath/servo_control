@@ -3,11 +3,14 @@ import time
 import os
 import cv2
 import pygame
+import asyncio
+import urllib.parse
 from flask import Flask, Response, render_template, request, jsonify, send_from_directory
 from dotenv import load_dotenv
 from camera_manager import CameraManager
 from servo_manager import ServoManager
 from input_manager import InputManager
+from telegram_sender import send_photo_to_telegram
 
 # Handle XDG_RUNTIME_DIR issue on Raspberry Pi OS
 if not os.environ.get('XDG_RUNTIME_DIR'):
@@ -49,7 +52,7 @@ class WebCameraServer:
             pygame.joystick.init()
         
     def _create_template_if_missing(self):
-        """Create/Update the index.html template with capture display and controller status"""
+        """Create/Update the index.html template with library management"""
         template_path = os.path.join('templates', 'index.html')
         
         # Updated HTML content
@@ -201,17 +204,48 @@ class WebCameraServer:
             overflow-y: auto;
         }
         .captures-list li {
-            margin-bottom: 5px;
-            padding: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            padding: 8px;
             background-color: #f9f9f9;
             border-radius: 3px;
+            border: 1px solid #eee;
         }
-        .captures-list a {
-            text-decoration: none;
-            color: #007bff;
+        .captures-list .file-info {
+            flex-grow: 1;
+            margin-right: 10px;
         }
-        .captures-list a:hover {
-            text-decoration: underline;
+        .captures-list .file-actions button {
+            margin-left: 5px;
+            padding: 3px 8px;
+            font-size: 0.9em;
+            cursor: pointer;
+        }
+        .btn-delete {
+            background-color: #f44336;
+            color: white;
+            border: none;
+            border-radius: 3px;
+        }
+        .btn-telegram {
+            background-color: #0088cc;
+            color: white;
+            border: none;
+            border-radius: 3px;
+        }
+        .btn-telegram:disabled {
+             background-color: #cccccc;
+             cursor: not-allowed;
+        }
+        .btn-refresh {
+            margin-left: 10px;
+            padding: 3px 8px;
+            font-size: 0.9em;
+        }
+        .file-status {
+             font-size: 0.8em; color: grey; margin-left: 5px;
         }
         .recording-indicator {
             display: inline-block;
@@ -304,7 +338,10 @@ class WebCameraServer:
         </div>
 
         <div class="captures-list">
-             <h2>Captured Files</h2>
+             <h2>
+                 Captured Files
+                 <button id="refreshCapturesBtn" class="btn-refresh" title="Refresh List">&#x21bb;</button>
+             </h2>
              <ul id="capturesList">
                  <li>Loading captures...</li>
              </ul>
@@ -341,6 +378,8 @@ class WebCameraServer:
         const rawAxisRTEl = document.getElementById('rawAxisRT');
         const rawButton0El = document.getElementById('rawButton0');
         const rawButton3El = document.getElementById('rawButton3');
+        
+        const refreshCapturesBtn = document.getElementById('refreshCapturesBtn');
         
         // Update servo position when sliders change
         horizontalSlider.addEventListener('input', updateValues);
@@ -437,20 +476,54 @@ class WebCameraServer:
 
         // Fetch and display captured files
         function fetchCaptures() {
+            // Indicate loading
+            capturesList.innerHTML = '<li>Loading captures...</li>';
+            
             fetch('/api/captures')
                 .then(response => response.json())
                 .then(data => {
                     capturesList.innerHTML = ''; // Clear existing list
                     if (data.files && data.files.length > 0) {
-                        // Sort files reverse chronologically (newest first)
-                        data.files.sort().reverse(); 
+                        // No need to sort here if server sorts
                         data.files.forEach(file => {
                             const li = document.createElement('li');
+                            li.dataset.filename = file; // Store filename
+
+                            const fileInfo = document.createElement('div');
+                            fileInfo.classList.add('file-info');
+
                             const a = document.createElement('a');
-                            a.href = `/captures/${file}`;
+                            a.href = `/captures/${encodeURIComponent(file)}`; // Ensure filename is encoded for URL
                             a.textContent = file;
-                            a.target = '_blank'; // Open in new tab
-                            li.appendChild(a);
+                            a.target = '_blank';
+                            fileInfo.appendChild(a);
+                            
+                            const fileActions = document.createElement('div');
+                            fileActions.classList.add('file-actions');
+
+                            // Add Status Span (for Telegram/Delete messages)
+                            const statusSpan = document.createElement('span');
+                            statusSpan.classList.add('file-status');
+                            fileActions.appendChild(statusSpan);
+
+                            // Add Telegram Button (only for images for now)
+                            if (file.toLowerCase().endsWith('.jpg') || file.toLowerCase().endsWith('.jpeg') || file.toLowerCase().endsWith('.png')) {
+                                const sendBtn = document.createElement('button');
+                                sendBtn.textContent = 'Send Telegram';
+                                sendBtn.classList.add('btn-telegram');
+                                sendBtn.onclick = () => sendToTelegram(file, sendBtn, statusSpan);
+                                fileActions.appendChild(sendBtn);
+                            }
+
+                            // Add Delete Button
+                            const deleteBtn = document.createElement('button');
+                            deleteBtn.textContent = 'Delete';
+                            deleteBtn.classList.add('btn-delete');
+                            deleteBtn.onclick = () => deleteCapture(file, li, deleteBtn, statusSpan);
+                            fileActions.appendChild(deleteBtn);
+
+                            li.appendChild(fileInfo);
+                            li.appendChild(fileActions);
                             capturesList.appendChild(li);
                         });
                     } else {
@@ -461,6 +534,71 @@ class WebCameraServer:
                     console.error('Error fetching captures:', error);
                     capturesList.innerHTML = '<li>Error loading captures.</li>';
                 });
+        }
+        
+        // Function to delete a capture
+        function deleteCapture(filename, listItem, button, statusSpan) {
+             if (!confirm(`Are you sure you want to delete ${filename}?`)) {
+                 return;
+             }
+             button.disabled = true;
+             statusSpan.textContent = 'Deleting...';
+             statusSpan.style.color = 'orange';
+
+             fetch(`/api/captures/delete/${encodeURIComponent(filename)}`, { method: 'DELETE' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        listItem.remove(); // Remove from list on success
+                    } else {
+                        console.error("Delete failed:", data.error);
+                        statusSpan.textContent = `Delete failed: ${data.error}`;
+                        statusSpan.style.color = 'red';
+                        button.disabled = false; // Re-enable button on failure
+                        setTimeout(() => { statusSpan.textContent = ''; }, 5000); // Clear status after delay
+                    }
+                 })
+                 .catch(error => {
+                     console.error('Error deleting file:', error);
+                     statusSpan.textContent = `Error: ${error}`;
+                     statusSpan.style.color = 'red';
+                     button.disabled = false;
+                     setTimeout(() => { statusSpan.textContent = ''; }, 5000);
+                 });
+        }
+
+        // Function to send image to Telegram
+        function sendToTelegram(filename, button, statusSpan) {
+             button.disabled = true;
+             statusSpan.textContent = 'Sending...';
+             statusSpan.style.color = 'orange';
+             
+             fetch(`/api/captures/send/${encodeURIComponent(filename)}`, { method: 'POST' })
+                 .then(response => response.json())
+                 .then(data => {
+                     if (data.success) {
+                         statusSpan.textContent = 'Sent!';
+                         statusSpan.style.color = 'green';
+                     } else {
+                         console.error("Telegram send failed:", data.error);
+                         statusSpan.textContent = `Send failed: ${data.error}`;
+                         statusSpan.style.color = 'red';
+                     }
+                     // Re-enable button after a short delay, clear status
+                     setTimeout(() => { 
+                         button.disabled = false; 
+                         statusSpan.textContent = ''; 
+                     }, 5000);
+                 })
+                 .catch(error => {
+                     console.error('Error sending to Telegram:', error);
+                     statusSpan.textContent = `Error: ${error}`;
+                     statusSpan.style.color = 'red';
+                      setTimeout(() => { 
+                         button.disabled = false; 
+                         statusSpan.textContent = ''; 
+                     }, 5000);
+                 });
         }
         
         // Update status from server
@@ -577,11 +715,13 @@ class WebCameraServer:
             }
         }
         
-        // Update status every 2 seconds
-        setInterval(updateStatus, 2000);
+        // Add event listener for refresh button
+        refreshCapturesBtn.addEventListener('click', fetchCaptures);
         
-        // Initial update
-        updateStatus();
+        // Initial calls and interval
+        fetchCaptures(); // Load captures on page load
+        updateStatus(); // Update status on page load
+        setInterval(updateStatus, 2000); // Update status every 2 seconds
     </script>
 </body>
 </html>"""
@@ -674,22 +814,83 @@ class WebCameraServer:
                  'is_recording': current_rec_status['is_recording'] 
              })
              
-        # New route to list captures
+        # Modified route to list captures
         @self.app.route('/api/captures')
         def list_captures():
             try:
-                files = [f for f in os.listdir(self.app.config['CAPTURE_DIR']) 
-                         if os.path.isfile(os.path.join(self.app.config['CAPTURE_DIR'], f))]
-                files.sort(key=lambda x: os.path.getmtime(os.path.join(self.app.config['CAPTURE_DIR'], x)), reverse=True)
+                capture_dir = self.app.config['CAPTURE_DIR']
+                files = [f for f in os.listdir(capture_dir) 
+                         if os.path.isfile(os.path.join(capture_dir, f))]
+                # Sort by modification time, newest first
+                files.sort(key=lambda x: os.path.getmtime(os.path.join(capture_dir, x)), reverse=True)
                 return jsonify({'files': files})
             except Exception as e:
+                print(f"Error listing captures: {e}")
                 return jsonify({'error': str(e)}), 500
         
-        # New route to serve captured files
+        # Route to serve captured files (ensure filename is handled safely)
         @self.app.route('/captures/<path:filename>')
         def serve_capture(filename):
-            return send_from_directory(self.app.config['CAPTURE_DIR'], filename)
-    
+            # Basic security check: prevent accessing files outside capture dir
+            safe_filename = os.path.basename(filename) # Use only the filename part
+            if safe_filename != filename: # Check if path traversal was attempted
+                 return "Invalid filename", 400
+            return send_from_directory(self.app.config['CAPTURE_DIR'], safe_filename)
+            
+        # New route to DELETE a capture
+        @self.app.route('/api/captures/delete/<path:filename>', methods=['DELETE'])
+        def delete_capture_api(filename):
+            try:
+                capture_dir = self.app.config['CAPTURE_DIR']
+                # Basic security check
+                safe_filename = os.path.basename(filename)
+                if safe_filename != filename:
+                     return jsonify({'success': False, 'error': 'Invalid filename'}), 400
+                
+                file_path = os.path.join(capture_dir, safe_filename)
+                
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    print(f"Deleted capture: {safe_filename}")
+                    return jsonify({'success': True, 'message': f'{safe_filename} deleted.'})
+                else:
+                    return jsonify({'success': False, 'error': 'File not found'}), 404
+            except Exception as e:
+                print(f"Error deleting capture {filename}: {e}")
+                return jsonify({'success': False, 'error': str(e)}), 500
+                
+        # New route to send a capture to Telegram
+        @self.app.route('/api/captures/send/<path:filename>', methods=['POST'])
+        def send_capture_telegram_api(filename):
+            try:
+                capture_dir = self.app.config['CAPTURE_DIR']
+                # Basic security check
+                safe_filename = os.path.basename(filename)
+                if safe_filename != filename:
+                     return jsonify({'success': False, 'error': 'Invalid filename'}), 400
+                
+                file_path = os.path.join(capture_dir, safe_filename)
+                
+                if not os.path.exists(file_path):
+                     return jsonify({'success': False, 'error': 'File not found'}), 404
+                
+                # Run the async function in the event loop
+                # Flask runs in its own thread, so get/create an event loop
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:  # No event loop running in this thread
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                # Run send_photo_to_telegram and wait for result
+                success, message = loop.run_until_complete(send_photo_to_telegram(file_path, caption=safe_filename))
+                
+                return jsonify({'success': success, 'error': None if success else message, 'message': message if success else None})
+
+            except Exception as e:
+                print(f"Error sending capture {filename} to Telegram: {e}")
+                return jsonify({'success': False, 'error': str(e)}), 500
+
     def _generate_frames(self):
         """Generate frames for MJPEG streaming"""
         while True:
