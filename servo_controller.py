@@ -37,13 +37,12 @@ pygame.init()
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption("Servo Controller with RTSP Camera")
+pygame.display.set_caption("Servo Controller with Pi Camera")
 
 # Font for displaying information
 font = pygame.font.Font(None, 36)
 
-# RTSP Camera Configuration
-RTSP_URL = os.environ.get('RTSP_URL', 'rtsp://admin:admin@192.168.1.100:554/stream1')
+# Camera Configuration
 camera_connected = False
 frame = None
 frame_lock = threading.Lock()
@@ -64,42 +63,38 @@ def map_to_pwm(value):
     # Map the joystick range (-1 to 1) to PWM range (0 to 100)
     return (value + 1) * 50  # PWM duty cycle is between 0 and 100
 
-# Function to capture frames from the RTSP stream
-def rtsp_stream_thread():
+# Function to capture frames from the Pi camera
+def camera_stream_thread():
     global frame, camera_connected
     
-    while True:
-        try:
-            cap = cv2.VideoCapture(RTSP_URL)
-            if not cap.isOpened():
-                print("Cannot open RTSP stream")
-                time.sleep(5)  # Wait before retrying
-                continue
-                
-            camera_connected = True
-            print("RTSP camera connected")
+    try:
+        # Initialize Pi camera
+        import picamera
+        import picamera.array
+        
+        with picamera.PiCamera() as camera:
+            camera.resolution = (SCREEN_WIDTH, SCREEN_HEIGHT)
+            camera.framerate = 30
             
-            while True:
-                ret, new_frame = cap.read()
-                if not ret:
-                    print("Failed to get frame")
-                    break
-                
+            # Create a numpy array to store the frame
+            output = picamera.array.PiRGBArray(camera, size=(SCREEN_WIDTH, SCREEN_HEIGHT))
+            
+            camera_connected = True
+            print("Pi camera connected")
+            
+            for frame_array in camera.capture_continuous(output, format='rgb', use_video_port=True):
                 with frame_lock:
-                    # Convert to RGB for Pygame
-                    frame = cv2.cvtColor(new_frame, cv2.COLOR_BGR2RGB)
-                    frame = cv2.resize(frame, (SCREEN_WIDTH, SCREEN_HEIGHT))
-                
+                    frame = frame_array.array
+                output.truncate(0)
                 time.sleep(0.033)  # ~30fps
                 
-        except Exception as e:
-            print(f"RTSP Error: {e}")
-            
+    except Exception as e:
+        print(f"Camera Error: {e}")
         camera_connected = False
-        time.sleep(5)  # Wait before reconnecting
+        time.sleep(5)  # Wait before retrying
 
-# Start the RTSP capture in a separate thread
-camera_thread = threading.Thread(target=rtsp_stream_thread, daemon=True)
+# Start the camera capture in a separate thread
+camera_thread = threading.Thread(target=camera_stream_thread, daemon=True)
 camera_thread.start()
 
 # Create a clock to control the frame rate

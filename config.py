@@ -1,22 +1,21 @@
 import os
 from dotenv import load_dotenv
 
-# Load environment variables
+# Load environment variables from .env file
 load_dotenv()
 
-# Display settings
+# Screen dimensions
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600
-DISPLAY_CAPTION = "Servo Controller with RTSP Camera"
-FRAME_RATE = 60
-
-# RTSP Camera settings
-RTSP_URL = os.environ.get('RTSP_URL', 'rtsp://admin:admin@192.168.1.100:554/stream1')
 
 # GPIO pins for servos
-SERVO_HORIZONTAL_PIN = int(os.environ.get('SERVO_HORIZONTAL_PIN', 17))  # Azimuth (Horizontal)
-SERVO_VERTICAL_PIN = int(os.environ.get('SERVO_VERTICAL_PIN', 18))      # Elevation (Vertical)
-SERVO_FOCUS_PIN = int(os.environ.get('SERVO_FOCUS_PIN', 27))            # Focus
+HORIZONTAL_PIN = int(os.environ.get('SERVO_HORIZONTAL_PIN', 17))
+VERTICAL_PIN = int(os.environ.get('SERVO_VERTICAL_PIN', 18))
+FOCUS_PIN = int(os.environ.get('SERVO_FOCUS_PIN', 27))
 
-# PWM Settings
-PWM_FREQUENCY = 50  # Hz 
+# PWM frequency for servos
+PWM_FREQ = 50  # Standard 50Hz for servos
+
+# Display settings
+DISPLAY_CAPTION = "Servo Controller with RTSP Camera"
+FRAME_RATE = 60 

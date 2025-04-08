@@ -12,18 +12,15 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# RTSP Camera Configuration
-RTSP_URL = os.environ.get('RTSP_URL', 'rtsp://admin:admin@192.168.1.100:554/stream1')
+# Camera Configuration
+camera_connected = False
+frame = None
+frame_lock = threading.Lock()
 
 # Define GPIO pins for servos
 SERVO_HORIZONTAL_PIN = int(os.environ.get('SERVO_HORIZONTAL_PIN', 17))
 SERVO_VERTICAL_PIN = int(os.environ.get('SERVO_VERTICAL_PIN', 18))
 SERVO_FOCUS_PIN = int(os.environ.get('SERVO_FOCUS_PIN', 27))
-
-# Global variables for the camera feed
-frame = None
-frame_lock = threading.Lock()
-camera_connected = False
 
 # Setup GPIO
 GPIO.setmode(GPIO.BCM)
@@ -46,44 +43,42 @@ horizontal_pos = 0
 vertical_pos = 0
 focus_pos = 0
 
-# Thread to capture RTSP stream
-def rtsp_stream_thread():
+# Thread to capture from Pi camera
+def camera_stream_thread():
     global frame, camera_connected
     
-    while True:
-        try:
-            cap = cv2.VideoCapture(RTSP_URL)
-            if not cap.isOpened():
-                print("Cannot open RTSP stream")
-                time.sleep(5)  # Wait before retrying
-                continue
-                
-            camera_connected = True
-            print("RTSP camera connected")
+    try:
+        # Initialize Pi camera
+        import picamera
+        import picamera.array
+        
+        with picamera.PiCamera() as camera:
+            camera.resolution = (800, 600)
+            camera.framerate = 30
             
-            while True:
-                ret, new_frame = cap.read()
-                if not ret:
-                    print("Failed to get frame")
-                    break
-                
+            # Create a numpy array to store the frame
+            output = picamera.array.PiRGBArray(camera, size=(800, 600))
+            
+            camera_connected = True
+            print("Pi camera connected")
+            
+            for frame_array in camera.capture_continuous(output, format='bgr', use_video_port=True):
                 with frame_lock:
-                    frame = new_frame
-                
+                    frame = frame_array.array
+                output.truncate(0)
                 time.sleep(0.033)  # ~30fps
                 
-        except Exception as e:
-            print(f"RTSP Error: {e}")
-            
+    except Exception as e:
+        print(f"Camera Error: {e}")
         camera_connected = False
-        time.sleep(5)  # Wait before reconnecting
+        time.sleep(5)  # Wait before retrying
 
 # Function to map from -1,1 range to PWM duty cycle
 def map_to_pwm(value):
     return (value + 1) * 50  # Map from -1,1 to 0,100
 
-# Start the RTSP capture thread
-camera_thread = threading.Thread(target=rtsp_stream_thread, daemon=True)
+# Start the camera capture thread
+camera_thread = threading.Thread(target=camera_stream_thread, daemon=True)
 camera_thread.start()
 
 # Generate frames for MJPEG stream
