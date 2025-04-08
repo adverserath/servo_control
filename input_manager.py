@@ -1,12 +1,21 @@
 import pygame
 import threading
 import time
+import os
 
 class InputManager:
     def __init__(self):
         # Initialize pygame if not already initialized
         if not pygame.get_init():
             pygame.init()
+        
+        # Initialize display before joystick to ensure video system is initialized
+        if not pygame.display.get_init():
+            # Set SDL_VIDEODRIVER to dummy if on headless system
+            if not os.environ.get('DISPLAY') and not os.environ.get('WAYLAND_DISPLAY'):
+                os.environ['SDL_VIDEODRIVER'] = 'dummy'
+            pygame.display.init()
+            pygame.display.set_mode((1, 1), pygame.HIDDEN)
         
         # Initialize joystick module if not already initialized
         if not pygame.joystick.get_init():
@@ -33,10 +42,6 @@ class InputManager:
         self.thread = threading.Thread(target=self._input_loop)
         self.thread.daemon = True
         self.thread.start()
-        
-        # Initialize display for pygame events
-        pygame.display.init()
-        pygame.display.set_mode((1, 1), pygame.HIDDEN)
     
     def _connect_joystick(self):
         """Try to connect to the first available joystick"""
@@ -60,24 +65,15 @@ class InputManager:
         """Main input processing loop"""
         while self.running:
             try:
-                # Process pygame events
-                for event in pygame.event.get():
-                    if event.type == pygame.JOYAXISMOTION:
-                        with self.lock:
-                            # Map joystick axes to controls
-                            if event.axis == 0:  # Left stick X
-                                self.horizontal = event.value
-                            elif event.axis == 1:  # Left stick Y
-                                self.vertical = -event.value  # Invert Y axis
-                            elif event.axis == 3:  # Right stick X
-                                self.focus = event.value
-                
                 # Check joystick connection
                 if not self.connected and pygame.joystick.get_count() > 0:
                     self._connect_joystick()
                 elif self.connected and pygame.joystick.get_count() == 0:
                     self.connected = False
                     self.error = "Joystick disconnected"
+                
+                # Process events in the main loop
+                self.process_events()
                 
                 time.sleep(0.01)  # Small delay to prevent CPU overuse
                 
@@ -93,7 +89,7 @@ class InputManager:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     quit_requested = True
-                elif event.type == pygame.JOYAXISMOTION:
+                elif event.type == pygame.JOYAXISMOTION and self.connected:
                     # Map joystick axes to controls
                     if event.axis == 0:  # Left stick X
                         self.horizontal = event.value
