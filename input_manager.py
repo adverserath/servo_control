@@ -45,6 +45,12 @@ class InputManager:
         self.horizontal = 0
         self.vertical = 0
         self.focus = 0
+        self._left_trigger = 0  # Store trigger values separately
+        self._right_trigger = 0
+        
+        # Request flags
+        self.capture_requested = False
+        self.toggle_recording_requested = False
         
         # Lock for thread safety
         self.lock = threading.Lock()
@@ -130,30 +136,60 @@ class InputManager:
         """Process pygame events and return True if quit requested"""
         quit_requested = False
         with self.lock:
+            # Reset request flags at the start of processing
+            self.capture_requested = False
+            self.toggle_recording_requested = False
+            
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     quit_requested = True
+                    
                 elif event.type == pygame.JOYAXISMOTION and self.connected:
                     # Map joystick axes to controls
-                    if event.axis == 0:  # Left stick X
+                    # Axis mapping might need adjustment based on controller
+                    if event.axis == 2:  # Right stick X (Horizontal)
                         self.horizontal = event.value
-                        if self.debug:
-                            print(f"Joystick axis 0 (X): {event.value:.2f}")
-                    elif event.axis == 1:  # Left stick Y
+                        if self.debug: print(f"Joystick axis 2 (H): {event.value:.2f}")
+                    elif event.axis == 3:  # Right stick Y (Vertical)
                         self.vertical = -event.value  # Invert Y axis
-                        if self.debug:
-                            print(f"Joystick axis 1 (Y): {event.value:.2f} -> {self.vertical:.2f}")
-                    elif event.axis == 3:  # Right stick X
-                        self.focus = event.value
-                        if self.debug:
-                            print(f"Joystick axis 3 (Focus): {event.value:.2f}")
+                        if self.debug: print(f"Joystick axis 3 (V): {event.value:.2f} -> {self.vertical:.2f}")
+                    elif event.axis == 4: # Left Trigger (often -1 to 1)
+                         # Map trigger from (-1 to 1) to (0 to 1)
+                        self._left_trigger = (event.value + 1) / 2
+                        if self.debug: print(f"Joystick axis 4 (L Trig): {event.value:.2f} -> {self._left_trigger:.2f}")
+                    elif event.axis == 5: # Right Trigger (often -1 to 1)
+                        # Map trigger from (-1 to 1) to (0 to 1)
+                        self._right_trigger = (event.value + 1) / 2
+                        if self.debug: print(f"Joystick axis 5 (R Trig): {event.value:.2f} -> {self._right_trigger:.2f}")
+
+                    # Combine triggers for focus control (-1 to 1)
+                    self.focus = self._right_trigger - self._left_trigger
+                    # Optional: Add deadzone for focus if needed
+                    # focus_deadzone = 0.1
+                    # if abs(self.focus) < focus_deadzone:
+                    #     self.focus = 0
+                        
                 elif event.type == pygame.JOYBUTTONDOWN and self.connected:
-                    if self.debug:
-                        print(f"Joystick button {event.button} pressed")
-                elif event.type == pygame.JOYBUTTONUP and self.connected:
-                    if self.debug:
-                        print(f"Joystick button {event.button} released")
+                    if self.debug: print(f"Joystick button {event.button} pressed")
+                    # Button mapping might need adjustment
+                    if event.button == 0:  # Cross Button (X)
+                        self.capture_requested = True
+                        if self.debug: print("Capture requested (Button 0)")
+                    elif event.button == 3:  # Square Button
+                        self.toggle_recording_requested = True
+                        if self.debug: print("Toggle recording requested (Button 3)")
+                        
+                # Optional: Add JOYHATMOTION or JOYBUTTONUP if needed
+
         return quit_requested
+    
+    def check_capture_request(self):
+        with self.lock:
+            return self.capture_requested
+
+    def check_toggle_recording_request(self):
+        with self.lock:
+            return self.toggle_recording_requested
     
     def get_control_values(self):
         """Get current control values"""

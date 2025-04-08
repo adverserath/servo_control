@@ -3,7 +3,7 @@ import time
 import os
 import cv2
 import pygame
-from flask import Flask, Response, render_template, request, jsonify
+from flask import Flask, Response, render_template, request, jsonify, send_from_directory
 from dotenv import load_dotenv
 from camera_manager import CameraManager
 from servo_manager import ServoManager
@@ -17,6 +17,8 @@ if not os.environ.get('XDG_RUNTIME_DIR'):
     os.makedirs(runtime_dir, exist_ok=True)
     os.environ['XDG_RUNTIME_DIR'] = runtime_dir
 
+CAPTURE_DIR = "captures"
+
 class WebCameraServer:
     def __init__(self, servo_manager: ServoManager, camera_manager: CameraManager, input_manager: InputManager, port=8080):
         self.app = Flask(__name__, template_folder='templates')
@@ -24,6 +26,10 @@ class WebCameraServer:
         self.servo_manager = servo_manager
         self.camera_manager = camera_manager
         self.input_manager = input_manager
+        
+        # Ensure captures directory exists (used by CameraManager too)
+        os.makedirs(CAPTURE_DIR, exist_ok=True)
+        self.app.config['CAPTURE_DIR'] = CAPTURE_DIR
         
         # Ensure templates directory exists
         os.makedirs('templates', exist_ok=True)
@@ -43,12 +49,11 @@ class WebCameraServer:
             pygame.joystick.init()
         
     def _create_template_if_missing(self):
-        """Create the index.html template if it doesn't exist"""
+        """Create/Update the index.html template with capture display"""
         template_path = os.path.join('templates', 'index.html')
         
-        if not os.path.exists(template_path):
-            with open(template_path, 'w') as f:
-                f.write("""<!DOCTYPE html>
+        # Updated HTML content
+        html_content = """<!DOCTYPE html>
 <html>
 <head>
     <title>Servo Camera Control</title>
@@ -179,6 +184,51 @@ class WebCameraServer:
             font-style: italic;
             margin-top: 5px;
         }
+        .captures-list {
+            margin-top: 20px;
+            background: white;
+            border-radius: 5px;
+            padding: 15px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .captures-list h2 {
+            margin-top: 0;
+        }
+        .captures-list ul {
+            list-style: none;
+            padding: 0;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .captures-list li {
+            margin-bottom: 5px;
+            padding: 5px;
+            background-color: #f9f9f9;
+            border-radius: 3px;
+        }
+        .captures-list a {
+            text-decoration: none;
+            color: #007bff;
+        }
+        .captures-list a:hover {
+            text-decoration: underline;
+        }
+        .recording-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background-color: red;
+            border-radius: 50%;
+            margin-left: 10px;
+            animation: blink 1s infinite;
+            vertical-align: middle;
+        }
+        @keyframes blink {
+            0% { opacity: 1; }
+            50% { opacity: 0; }
+            100% { opacity: 1; }
+        }
+        .hidden { display: none; }
     </style>
 </head>
 <body>
@@ -187,8 +237,13 @@ class WebCameraServer:
         
         <div class="video-container">
             <img class="video-feed" src="/video_feed" alt="Camera Feed">
-            <button id="captureButton" class="capture-button">Capture Still Image</button>
+            <div>
+                 <button id="captureButton" class="capture-button">Capture Still Image (X)</button>
+                 <button id="recordButton" class="capture-button">Start Recording (Square)</button>
+                 <span id="recordingIndicator" class="recording-indicator hidden"></span>
+            </div>
             <div id="captureStatus" class="capture-status"></div>
+            <div id="recordStatus" class="capture-status"></div>
         </div>
         
         <div class="control-panel">
@@ -239,6 +294,13 @@ class WebCameraServer:
                 </div>
             </div>
         </div>
+
+        <div class="captures-list">
+             <h2>Captured Files</h2>
+             <ul id="capturesList">
+                 <li>Loading captures...</li>
+             </ul>
+         </div>
     </div>
     
     <script>
@@ -252,6 +314,10 @@ class WebCameraServer:
         const statusEl = document.getElementById('status');
         const captureButton = document.getElementById('captureButton');
         const captureStatus = document.getElementById('captureStatus');
+        const recordButton = document.getElementById('recordButton');
+        const recordStatus = document.getElementById('recordStatus');
+        const recordingIndicator = document.getElementById('recordingIndicator');
+        const capturesList = document.getElementById('capturesList');
         
         // Status elements
         const cameraStatus = document.getElementById('cameraStatus');
@@ -267,7 +333,8 @@ class WebCameraServer:
         focusSlider.addEventListener('input', updateValues);
         
         // Capture still image when button is clicked
-        captureButton.addEventListener('click', captureStill);
+        captureButton.addEventListener('click', captureStillWeb);
+        recordButton.addEventListener('click', toggleRecordingWeb);
         
         // Convert slider value (0-100) to servo value (-1 to 1)
         function sliderToServo(value) {
@@ -301,30 +368,84 @@ class WebCameraServer:
         }
         
         // Capture still image
-        function captureStill() {
+        function captureStillWeb() {
             captureButton.disabled = true;
             captureStatus.style.display = 'none';
             
-            fetch('/api/capture', {
-                method: 'POST'
-            })
-            .then(response => response.json())
-            .then(data => {
-                captureStatus.textContent = data.success ? 
-                    `Image captured: ${data.filename}` : 
-                    `Error: ${data.error}`;
-                captureStatus.className = 'capture-status ' + 
-                    (data.success ? 'capture-success' : 'capture-error');
-                captureStatus.style.display = 'block';
-            })
-            .catch(error => {
-                captureStatus.textContent = `Error: ${error}`;
-                captureStatus.className = 'capture-status capture-error';
-                captureStatus.style.display = 'block';
-            })
-            .finally(() => {
-                captureButton.disabled = false;
-            });
+            fetch('/api/capture', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    showCaptureStatus(data.success, data.success ? `Image captured: ${data.filename}` : `Error: ${data.error}`);
+                    if(data.success) { fetchCaptures(); } // Refresh list on success
+                })
+                .catch(error => { showCaptureStatus(false, `Error: ${error}`); })
+                .finally(() => { captureButton.disabled = false; });
+        }
+        
+        // Toggle recording
+        function toggleRecordingWeb() {
+            recordButton.disabled = true;
+            recordStatus.style.display = 'none';
+            
+            fetch('/api/record/toggle', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    showRecordStatus(data.success, data.message);
+                    // Update button text and indicator based on new state
+                    updateRecordingUI(data.is_recording);
+                    if(data.success && !data.is_recording) { fetchCaptures(); } // Refresh list when recording stops
+                })
+                .catch(error => { showRecordStatus(false, `Error: ${error}`); })
+                .finally(() => { recordButton.disabled = false; });
+        }
+        
+        function showCaptureStatus(success, message) {
+            captureStatus.textContent = message;
+            captureStatus.className = 'capture-status ' + (success ? 'capture-success' : 'capture-error');
+            captureStatus.style.display = 'block';
+            // Auto-hide after a few seconds
+            setTimeout(() => { captureStatus.style.display = 'none'; }, 5000);
+        }
+
+        function showRecordStatus(success, message) {
+            recordStatus.textContent = message;
+            recordStatus.className = 'capture-status ' + (success ? 'capture-success' : 'capture-error');
+            recordStatus.style.display = 'block';
+             // Auto-hide after a few seconds
+            setTimeout(() => { recordStatus.style.display = 'none'; }, 5000);
+        }
+        
+        function updateRecordingUI(isRecording) {
+             recordButton.textContent = isRecording ? 'Stop Recording (Square)' : 'Start Recording (Square)';
+             recordingIndicator.classList.toggle('hidden', !isRecording);
+        }
+
+        // Fetch and display captured files
+        function fetchCaptures() {
+            fetch('/api/captures')
+                .then(response => response.json())
+                .then(data => {
+                    capturesList.innerHTML = ''; // Clear existing list
+                    if (data.files && data.files.length > 0) {
+                        // Sort files reverse chronologically (newest first)
+                        data.files.sort().reverse(); 
+                        data.files.forEach(file => {
+                            const li = document.createElement('li');
+                            const a = document.createElement('a');
+                            a.href = `/captures/${file}`;
+                            a.textContent = file;
+                            a.target = '_blank'; // Open in new tab
+                            li.appendChild(a);
+                            capturesList.appendChild(li);
+                        });
+                    } else {
+                        capturesList.innerHTML = '<li>No captures found.</li>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching captures:', error);
+                    capturesList.innerHTML = '<li>Error loading captures.</li>';
+                });
         }
         
         // Update status from server
@@ -349,11 +470,17 @@ class WebCameraServer:
                     verticalValue.textContent = data.vertical_pos.toFixed(2);
                     focusValue.textContent = data.focus_pos.toFixed(2);
                     
-                    // Update capture button state
-                    captureButton.disabled = !data.camera_connected;
-                    
                     // Update system status
                     updateSystemStatus(data);
+                    
+                    // Update Recording UI
+                    if (data.camera_status && data.camera_status.recording_status) {
+                        updateRecordingUI(data.camera_status.recording_status.is_recording);
+                    }
+                    
+                    // Update capture/record button states
+                    captureButton.disabled = !data.camera_connected;
+                    recordButton.disabled = !data.camera_connected; // Can't record if not connected
                 })
                 .catch(error => {
                     console.error('Error:', error);
@@ -380,6 +507,11 @@ class WebCameraServer:
                     cameraError.style.display = 'block';
                 } else {
                     cameraError.style.display = 'none';
+                }
+                
+                // Add recording status display
+                if (data.camera_status.recording_status) {
+                    cameraStatus.textContent += data.camera_status.recording_status.is_recording ? ' (Recording)' : '';
                 }
             }
             
@@ -425,8 +557,21 @@ class WebCameraServer:
         updateStatus();
     </script>
 </body>
-</html>""")
-    
+</html>"""
+        
+        # Write the updated content
+        # Check if file exists and content is different to avoid unnecessary writes
+        needs_update = True
+        if os.path.exists(template_path):
+            with open(template_path, 'r') as f_read:
+                if f_read.read() == html_content:
+                    needs_update = False
+                    
+        if needs_update:
+            with open(template_path, 'w') as f:
+                f.write(html_content)
+            print("Updated index.html template.")
+
     def _setup_routes(self):
         """Set up Flask routes"""
         @self.app.route('/')
@@ -495,13 +640,40 @@ class WebCameraServer:
             })
         
         @self.app.route('/api/capture', methods=['POST'])
-        def capture():
+        def capture_web(): # Renamed to avoid conflict with CameraManager method
             success, result = self.camera_manager.capture_still()
             return jsonify({
                 'success': success,
                 'filename': result if success else None,
                 'error': None if success else result
             })
+        
+        @self.app.route('/api/record/toggle', methods=['POST'])
+        def toggle_record_web():
+             success, result_msg_or_file = self.camera_manager.toggle_recording()
+             # Get current recording state AFTER toggling
+             current_rec_status = self.camera_manager.get_status()['recording_status']
+             return jsonify({
+                 'success': success,
+                 'message': result_msg_or_file, # Contains filename or error message
+                 'is_recording': current_rec_status['is_recording'] 
+             })
+             
+        # New route to list captures
+        @self.app.route('/api/captures')
+        def list_captures():
+            try:
+                files = [f for f in os.listdir(self.app.config['CAPTURE_DIR']) 
+                         if os.path.isfile(os.path.join(self.app.config['CAPTURE_DIR'], f))]
+                files.sort(key=lambda x: os.path.getmtime(os.path.join(self.app.config['CAPTURE_DIR'], x)), reverse=True)
+                return jsonify({'files': files})
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+        
+        # New route to serve captured files
+        @self.app.route('/captures/<path:filename>')
+        def serve_capture(filename):
+            return send_from_directory(self.app.config['CAPTURE_DIR'], filename)
     
     def _generate_frames(self):
         """Generate frames for MJPEG streaming"""

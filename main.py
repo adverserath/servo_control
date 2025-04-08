@@ -57,6 +57,27 @@ def main():
             if quit_requested:
                 running = False
                 print("Quit requested")
+                continue
+            
+            # Check for capture/record requests
+            if input_manager.check_capture_request():
+                print("Capture requested via button...")
+                success, result = camera_manager.capture_still()
+                if success:
+                    print(f"Image captured successfully: {result}")
+                else:
+                    print(f"Image capture failed: {result}")
+
+            if input_manager.check_toggle_recording_request():
+                print("Toggle recording requested via button...")
+                success, result = camera_manager.toggle_recording()
+                if success:
+                    if camera_manager.is_recording:
+                        print(f"Recording started: {result}")
+                    else:
+                        print(f"Recording stopped: {result}")
+                else:
+                    print(f"Toggle recording failed: {result}")
             
             # Get control values
             controls = input_manager.get_control_values()
