@@ -14,7 +14,19 @@ try:
     picamera2_available = True
 except ImportError:
     picamera2_available = False
-    print("Warning: picamera2 module not found. Pi Camera support disabled.")
+    print("Info: picamera2 module not found. Pi Camera support disabled.")
+except Exception as e:
+    picamera2_available = False
+    print(f"Warning: Error importing picamera2: {e}. Pi Camera support disabled.")
+
+IS_RASPBERRY_PI = (platform.system() == 'Linux' and 
+                   os.path.exists('/proc/device-tree/model') and 
+                   'raspberry pi' in open('/proc/device-tree/model', 'r').read().lower())
+
+if IS_RASPBERRY_PI:
+    print("Info: Detected Raspberry Pi system.")
+else:
+    print("Info: Not detected as Raspberry Pi system (or /proc/device-tree/model check failed).")
 
 class CameraManager:
     def __init__(self):
@@ -41,29 +53,30 @@ class CameraManager:
         self.thread.start()
         
     def _camera_thread(self):
-        """Background thread to initialize and capture frames from Pi camera or webcam"""
+        """Background thread to initialize and capture frames"""
         retry_delay = 5
         while self.running:
             try:
                 if not self.connected or self.camera is None:
                     print("Camera not initialized. Attempting...")
-                    # Determine camera type and initialize
-                    if platform.system() == 'Linux' and os.path.exists('/proc/device-tree/model') and picamera2_available:
-                         with open('/proc/device-tree/model', 'r') as f:
-                             model = f.read().lower()
-                             if 'raspberry pi' in model:
-                                 self._init_pi_camera()
-                             else:
-                                 # Not a Pi, or picamera2 not installed, try webcam
-                                 print("Not detected as Raspberry Pi with picamera2, trying webcam...")
-                                 self._init_webcam()
-                    else:
-                         # Not Linux or picamera2 not available, try webcam
-                         print("Not Linux or picamera2 unavailable, trying webcam...")
-                         self._init_webcam()
                     
+                    # --- Determine Camera Type and Initialize ---
+                    use_pi_camera = IS_RASPBERRY_PI and picamera2_available
+                    
+                    if use_pi_camera:
+                        print("Attempting Pi Camera initialization...")
+                        self._init_pi_camera()
+                    else:
+                        if not IS_RASPBERRY_PI:
+                             print("Not on Raspberry Pi, trying webcam...")
+                        elif not picamera2_available:
+                             print("Picamera2 library not available/functional, trying webcam...")
+                        self._init_webcam()
+                    # --- End Initialization ---
+                        
                     if not self.connected:
                          print(f"Initialization failed: {self.error}. Retrying in {retry_delay}s...")
+                         self._cleanup_camera_object() # Ensure cleanup before retry
                          time.sleep(retry_delay)
                          continue # Retry initialization
                 
@@ -86,14 +99,18 @@ class CameraManager:
                                 else: # Webcam likely BGR already from OpenCV
                                     self.video_writer.write(frame_data)
                     else:
-                         # Failed to capture frame, might need reinitialization
-                         print("Failed to capture frame. Attempting reinitialization...")
+                         # Failed to capture frame
+                         print(f"Failed to capture frame using {self.camera_type}. Attempting reinitialization...")
                          self.error = "Failed to capture frame."
+                         if self.camera_type == "Webcam":
+                              print("Hint: Check webcam permissions (e.g., /dev/video0) or if another app is using it.")
                          self._cleanup_camera_object() # Clean up existing camera before retry
                          self.connected = False
-                         time.sleep(retry_delay)
+                         # No need to sleep here, loop will retry initialization immediately
                 
-                time.sleep(1.0 / FRAME_RATE) # Use configured frame rate for sleep
+                # Adjust sleep time based on whether we are connected
+                sleep_duration = (1.0 / FRAME_RATE) if self.connected else retry_delay / 2.0
+                time.sleep(sleep_duration) 
                     
             except Exception as e:
                 print(f"Critical Camera Error in _camera_thread: {e}")
@@ -136,14 +153,34 @@ class CameraManager:
             self.camera = None
 
     def _init_webcam(self):
-        """Initialize a standard webcam using OpenCV as fallback"""
-        print("Initializing Webcam (OpenCV)...")
+        """Initialize a standard webcam using OpenCV"""
+        print("Initializing Webcam (OpenCV) index 0...")
         try:
-            # Try to open the first available camera (index 0)
             self.camera = cv2.VideoCapture(0) 
             if not self.camera.isOpened():
-                raise IOError("Could not open webcam index 0")
+                # Try index 1 if 0 fails
+                print("Webcam index 0 failed, trying index 1...")
+                self.camera.release() # Release the failed attempt
+                self.camera = cv2.VideoCapture(1)
+                if not self.camera.isOpened():
+                     raise IOError("Could not open webcam index 0 or 1")
+                else:
+                     print("Using Webcam index 1.")
+            else:
+                print("Using Webcam index 0.")
             
+            # Give the camera a moment to initialize after opening
+            print("Waiting briefly for webcam to initialize...")
+            time.sleep(1.0) 
+            
+            # Try reading a test frame immediately after init
+            test_ret, _ = self.camera.read()
+            if not test_ret:
+                 # If read fails immediately, likely permissions or device issue
+                 raise IOError("Webcam opened but failed to read initial frame. Check permissions/device.")
+            else:
+                 print("Successfully read initial test frame from webcam.")
+                 
             # Set desired resolution (optional, might not be supported by all webcams)
             self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, SCREEN_WIDTH)
             self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, SCREEN_HEIGHT)
@@ -156,14 +193,13 @@ class CameraManager:
             self.connected = True
             self.error = None
             self.camera_type = "Webcam"
-            print("Webcam connected successfully.")
+            print("Webcam initialization successful.")
             
         except Exception as e:
             self.error = f"Webcam initialization error: {str(e)}"
             print(self.error)
             self.connected = False
-            if self.camera: # Ensure cleanup
-                self.camera.release()
+            if self.camera: self.camera.release()
             self.camera = None
 
     def _capture_frame(self):
