@@ -3,6 +3,7 @@ import threading
 import time
 import os
 import platform
+import gc # Import garbage collector
 from config import SCREEN_WIDTH, SCREEN_HEIGHT, FRAME_RATE
 # Remove dotenv import if not used elsewhere
 # from dotenv import load_dotenv
@@ -378,12 +379,16 @@ class CameraManager:
                  print(f"Error during camera object cleanup: {e}")
              finally:
                  self.camera = None # Set to None regardless of cleanup success
+                 # --- Explicit Garbage Collection --- 
+                 print("Running garbage collection...")
+                 gc.collect()
                  # --- Add Delay Here --- 
                  print("Waiting briefly after camera cleanup...")
-                 time.sleep(0.5) # Give 0.5 seconds for resource release
+                 time.sleep(1.5) # Give 1.5 seconds for resource release
          else:
-             # If self.camera was already None, still wait a bit before potential init
-             # time.sleep(0.1) # Optional shorter delay if camera was already None
+             # If self.camera was already None, maybe still collect?
+             # print("Running garbage collection (camera was None)...")
+             # gc.collect()
              pass
 
     def cleanup(self):
@@ -399,6 +404,8 @@ class CameraManager:
                  print("Warning: Camera thread did not terminate gracefully.")
         # Clean up camera object itself
         self._cleanup_camera_object()
+        # Optional: Add gc.collect() here too?
+        # gc.collect()
         print("Camera manager cleaned up.")
 
     # Remove old __del__ if it exists, cleanup() is preferred
