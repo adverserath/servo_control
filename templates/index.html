@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Servo Camera Control</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .video-container {
+            position: relative;
+            width: 100%;
+            margin-bottom: 20px;
+        }
+        .video-feed {
+            width: 100%;
+            border: 1px solid #ccc;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .control-panel {
+            background: white;
+            border-radius: 5px;
+            padding: 15px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .control-group {
+            margin-bottom: 15px;
+        }
+        h1, h2 {
+            color: #333;
+        }
+        .slider-container {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .slider-label {
+            width: 100px;
+        }
+        .slider {
+            flex-grow: 1;
+        }
+        .value-display {
+            width: 50px;
+            text-align: right;
+            margin-left: 10px;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #eee;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Servo Camera Control</h1>
+        
+        <div class="video-container">
+            <img class="video-feed" src="/video_feed" alt="Camera Feed">
+        </div>
+        
+        <div class="control-panel">
+            <h2>Controls</h2>
+            
+            <div class="control-group">
+                <div class="slider-container">
+                    <span class="slider-label">Horizontal:</span>
+                    <input type="range" id="horizontal" class="slider" min="-100" max="100" value="0">
+                    <span class="value-display" id="horizontal-value">0</span>
+                </div>
+                
+                <div class="slider-container">
+                    <span class="slider-label">Vertical:</span>
+                    <input type="range" id="vertical" class="slider" min="-100" max="100" value="0">
+                    <span class="value-display" id="vertical-value">0</span>
+                </div>
+                
+                <div class="slider-container">
+                    <span class="slider-label">Focus:</span>
+                    <input type="range" id="focus" class="slider" min="-100" max="100" value="0">
+                    <span class="value-display" id="focus-value">0</span>
+                </div>
+            </div>
+            
+            <div class="status" id="status">
+                Camera status: Connecting...
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Elements
+        const horizontalSlider = document.getElementById('horizontal');
+        const verticalSlider = document.getElementById('vertical');
+        const focusSlider = document.getElementById('focus');
+        const horizontalValue = document.getElementById('horizontal-value');
+        const verticalValue = document.getElementById('vertical-value');
+        const focusValue = document.getElementById('focus-value');
+        const statusEl = document.getElementById('status');
+        
+        // Update servo position when sliders change
+        horizontalSlider.addEventListener('input', updateValues);
+        verticalSlider.addEventListener('input', updateValues);
+        focusSlider.addEventListener('input', updateValues);
+        
+        // Convert slider value (0-100) to servo value (-1 to 1)
+        function sliderToServo(value) {
+            return value / 100;
+        }
+        
+        // Convert servo value (-1 to 1) to slider value (-100 to 100)
+        function servoToSlider(value) {
+            return value * 100;
+        }
+        
+        // Update display and send values to server
+        function updateValues() {
+            // Update display values
+            horizontalValue.textContent = horizontalSlider.value / 100;
+            verticalValue.textContent = verticalSlider.value / 100;
+            focusValue.textContent = focusSlider.value / 100;
+            
+            // Send to server
+            fetch('/api/control', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    horizontal: sliderToServo(horizontalSlider.value),
+                    vertical: sliderToServo(verticalSlider.value),
+                    focus: sliderToServo(focusSlider.value)
+                })
+            });
+        }
+        
+        // Update status from server
+        function updateStatus() {
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => {
+                    // Update status text
+                    statusEl.innerHTML = `
+                        Camera status: ${data.camera_connected ? 'Connected' : 'Disconnected'}<br>
+                        Horizontal: ${data.horizontal_pos.toFixed(2)}<br>
+                        Vertical: ${data.vertical_pos.toFixed(2)}<br>
+                        Focus: ${data.focus_pos.toFixed(2)}
+                    `;
+                    
+                    // Update sliders without triggering events
+                    horizontalSlider.value = servoToSlider(data.horizontal_pos);
+                    verticalSlider.value = servoToSlider(data.vertical_pos);
+                    focusSlider.value = servoToSlider(data.focus_pos);
+                    
+                    horizontalValue.textContent = data.horizontal_pos.toFixed(2);
+                    verticalValue.textContent = data.vertical_pos.toFixed(2);
+                    focusValue.textContent = data.focus_pos.toFixed(2);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+        }
+        
+        // Update status every 2 seconds
+        setInterval(updateStatus, 2000);
+        
+        // Initial update
+        updateStatus();
+    </script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+pygame>=2.5.0
+opencv-python>=4.7.0
+numpy>=1.23.0
+Flask==2.2.3
+Werkzeug==2.2.3 
