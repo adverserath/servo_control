@@ -134,11 +134,11 @@ class CameraManager:
             self._cleanup_camera_object() # Ensure any previous instance is closed
             self.camera = Picamera2()
             
-            # --- Simplified Configuration --- 
-            # Create a basic configuration first. 
-            # We can adjust format/size later if needed, but let's ensure init works.
-            config = self.camera.create_preview_configuration()
-            # --- End Simplified Configuration ---
+            # --- Try Still Configuration --- 
+            # Use create_still_configuration instead of preview as a test
+            print("Attempting still configuration...")
+            config = self.camera.create_still_configuration()
+            # --- End Still Configuration ---
             
             # Apply the configuration
             print("Configuring Pi Camera...")
