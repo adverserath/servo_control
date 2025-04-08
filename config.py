@@ -14,9 +14,9 @@ SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600
 
 # GPIO pins for servos
-HORIZONTAL_PIN = int(os.environ.get('SERVO_HORIZONTAL_PIN', 17))
-VERTICAL_PIN = int(os.environ.get('SERVO_VERTICAL_PIN', 18))
-FOCUS_PIN = int(os.environ.get('SERVO_FOCUS_PIN', 27))
+SERVO_HORIZONTAL_PIN = int(os.environ.get('SERVO_HORIZONTAL_PIN', 17))
+SERVO_VERTICAL_PIN = int(os.environ.get('SERVO_VERTICAL_PIN', 18))
+SERVO_FOCUS_PIN = int(os.environ.get('SERVO_FOCUS_PIN', 27))
 
 # PWM frequency for servos
 PWM_FREQ = 50  # Standard 50Hz for servos

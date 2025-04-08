@@ -3,7 +3,7 @@ import time
 import threading
 from config import (
     MOTOR_MODE,
-    HORIZONTAL_PIN, VERTICAL_PIN, FOCUS_PIN, PWM_FREQ,
+    SERVO_HORIZONTAL_PIN, SERVO_VERTICAL_PIN, SERVO_FOCUS_PIN, PWM_FREQ,
     STEPPER_ENABLE_PIN, STEPPER_DIR_PIN, STEPPER_STEP_PIN,
     STEPPER_MICROSTEPS, STEPPER_STEPS_PER_REV
 )
@@ -54,13 +54,13 @@ class ServoController(BaseMotorController):
         GPIO.setwarnings(False)
 
         # Set up PWM for each servo
-        GPIO.setup(HORIZONTAL_PIN, GPIO.OUT)
-        GPIO.setup(VERTICAL_PIN, GPIO.OUT)
-        GPIO.setup(FOCUS_PIN, GPIO.OUT)
+        GPIO.setup(SERVO_HORIZONTAL_PIN, GPIO.OUT)
+        GPIO.setup(SERVO_VERTICAL_PIN, GPIO.OUT)
+        GPIO.setup(SERVO_FOCUS_PIN, GPIO.OUT)
 
-        self.pwm_horizontal = GPIO.PWM(HORIZONTAL_PIN, PWM_FREQ)
-        self.pwm_vertical = GPIO.PWM(VERTICAL_PIN, PWM_FREQ)
-        self.pwm_focus = GPIO.PWM(FOCUS_PIN, PWM_FREQ)
+        self.pwm_horizontal = GPIO.PWM(SERVO_HORIZONTAL_PIN, PWM_FREQ)
+        self.pwm_vertical = GPIO.PWM(SERVO_VERTICAL_PIN, PWM_FREQ)
+        self.pwm_focus = GPIO.PWM(SERVO_FOCUS_PIN, PWM_FREQ)
 
         self.pwm_horizontal.start(0)
         self.pwm_vertical.start(0)
