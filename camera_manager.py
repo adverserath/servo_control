@@ -130,13 +130,34 @@ class CameraManager:
             return
         print("Initializing Pi Camera (picamera2)...")
         try:
+            self._cleanup_camera_object() # Ensure any previous instance is closed
             self.camera = Picamera2()
-            # Configure for preview and capture (RGB888 common)
-            config = self.camera.create_preview_configuration(
-                main={"size": (SCREEN_WIDTH, SCREEN_HEIGHT), "format": "RGB888"}
-            )
+            
+            # --- Simplified Configuration --- 
+            # Create a basic configuration first. 
+            # We can adjust format/size later if needed, but let's ensure init works.
+            config = self.camera.create_preview_configuration()
+            # --- End Simplified Configuration ---
+            
+            # Apply the configuration
+            print("Configuring Pi Camera...")
             self.camera.configure(config)
+            print("Configuration applied.")
+
+            # Optional: Add transformations AFTER configure/start if needed
+            # self.camera.options['transform'] = libcamera.Transform(hflip=1, vflip=1) # Old method, likely wrong
+            # New method (preferred): Use controls AFTER start()
+            # controls = {"hflip": 0, "vflip": 0} # 0=False, 1=True
+            # self.camera.set_controls(controls)
+            
+            print("Starting Pi Camera...")
             self.camera.start()
+            print("Pi Camera started.")
+
+            # Optional: Apply controls like flip *after* starting
+            # controls = {"hflip": 0, "vflip": 0} # Example: No flip
+            # self.camera.set_controls(controls)
+            # print("Applied controls (flip/rotate).")
             
             self.connected = True
             self.error = None
@@ -146,11 +167,10 @@ class CameraManager:
         except Exception as e:
             self.error = f"Pi camera initialization error: {str(e)}"
             print(self.error)
+            import traceback
+            traceback.print_exc() # Print full traceback for debugging
             self.connected = False
-            if self.camera: # Ensure cleanup on partial failure
-                 try: self.camera.close() 
-                 except: pass
-            self.camera = None
+            self._cleanup_camera_object() # Ensure cleanup on failure
 
     def _init_webcam(self):
         """Initialize a standard webcam using OpenCV"""
