@@ -2,8 +2,12 @@ import threading
 import time
 import os
 import cv2
+import pygame
 from flask import Flask, Response, render_template, request, jsonify
 from dotenv import load_dotenv
+from camera_manager import CameraManager
+from servo_manager import ServoManager
+from input_manager import InputManager
 
 # Handle XDG_RUNTIME_DIR issue on Raspberry Pi OS
 if not os.environ.get('XDG_RUNTIME_DIR'):
@@ -14,7 +18,7 @@ if not os.environ.get('XDG_RUNTIME_DIR'):
     os.environ['XDG_RUNTIME_DIR'] = runtime_dir
 
 class WebCameraServer:
-    def __init__(self, servo_manager, camera_manager, input_manager, port=8080):
+    def __init__(self, servo_manager: ServoManager, camera_manager: CameraManager, input_manager: InputManager, port=8080):
         self.app = Flask(__name__, template_folder='templates')
         self.port = port
         self.servo_manager = servo_manager
@@ -29,6 +33,14 @@ class WebCameraServer:
         
         # Set up routes
         self._setup_routes()
+        
+        # Initialize pygame if not already initialized
+        if not pygame.get_init():
+            pygame.init()
+        
+        # Initialize joystick module if not already initialized
+        if not pygame.joystick.get_init():
+            pygame.joystick.init()
         
     def _create_template_if_missing(self):
         """Create the index.html template if it doesn't exist"""

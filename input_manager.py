@@ -4,8 +4,13 @@ import time
 
 class InputManager:
     def __init__(self):
-        pygame.init()
-        pygame.joystick.init()
+        # Initialize pygame if not already initialized
+        if not pygame.get_init():
+            pygame.init()
+        
+        # Initialize joystick module if not already initialized
+        if not pygame.joystick.get_init():
+            pygame.joystick.init()
         
         # Initialize joystick
         self.joystick = None
@@ -100,5 +105,5 @@ class InputManager:
         self.running = False
         if self.thread.is_alive():
             self.thread.join()
-        pygame.quit()
+        # Don't quit pygame here, as it might be used by other parts of the application
         print("Input manager cleaned up") 

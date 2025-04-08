@@ -20,8 +20,9 @@ if not os.environ.get('XDG_RUNTIME_DIR'):
 def main():
     """Main entry point for the servo camera application"""
     try:
-        # Initialize pygame
-        pygame.init()
+        # Initialize pygame if not already initialized
+        if not pygame.get_init():
+            pygame.init()
         
         # Initialize managers
         servo_manager = ServoManager()
@@ -30,7 +31,7 @@ def main():
         display_manager = DisplayManager()
         
         # Start web server
-        web_server = WebCameraServer(servo_manager, camera_manager)
+        web_server = WebCameraServer(servo_manager, camera_manager, input_manager)
         web_server.start()
         
         print("Servo Camera Controller started")
