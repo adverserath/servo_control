@@ -60,6 +60,40 @@
             background-color: #eee;
             border-radius: 5px;
         }
+        .capture-button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 10px 0;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        .capture-button:hover {
+            background-color: #45a049;
+        }
+        .capture-button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .capture-status {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 5px;
+            display: none;
+        }
+        .capture-success {
+            background-color: #dff0d8;
+            color: #3c763d;
+        }
+        .capture-error {
+            background-color: #f2dede;
+            color: #a94442;
+        }
     </style>
 </head>
 <body>
@@ -68,6 +102,8 @@
         
         <div class="video-container">
             <img class="video-feed" src="/video_feed" alt="Camera Feed">
+            <button id="captureButton" class="capture-button">Capture Still Image</button>
+            <div id="captureStatus" class="capture-status"></div>
         </div>
         
         <div class="control-panel">
@@ -108,11 +144,16 @@
         const verticalValue = document.getElementById('vertical-value');
         const focusValue = document.getElementById('focus-value');
         const statusEl = document.getElementById('status');
+        const captureButton = document.getElementById('captureButton');
+        const captureStatus = document.getElementById('captureStatus');
         
         // Update servo position when sliders change
         horizontalSlider.addEventListener('input', updateValues);
         verticalSlider.addEventListener('input', updateValues);
         focusSlider.addEventListener('input', updateValues);
+        
+        // Capture still image when button is clicked
+        captureButton.addEventListener('click', captureStill);
         
         // Convert slider value (0-100) to servo value (-1 to 1)
         function sliderToServo(value) {
@@ -145,6 +186,33 @@
             });
         }
         
+        // Capture still image
+        function captureStill() {
+            captureButton.disabled = true;
+            captureStatus.style.display = 'none';
+            
+            fetch('/api/capture', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                captureStatus.textContent = data.success ? 
+                    `Image captured: ${data.filename}` : 
+                    `Error: ${data.error}`;
+                captureStatus.className = 'capture-status ' + 
+                    (data.success ? 'capture-success' : 'capture-error');
+                captureStatus.style.display = 'block';
+            })
+            .catch(error => {
+                captureStatus.textContent = `Error: ${error}`;
+                captureStatus.className = 'capture-status capture-error';
+                captureStatus.style.display = 'block';
+            })
+            .finally(() => {
+                captureButton.disabled = false;
+            });
+        }
+        
         // Update status from server
         function updateStatus() {
             fetch('/api/status')
@@ -166,6 +234,9 @@
                     horizontalValue.textContent = data.horizontal_pos.toFixed(2);
                     verticalValue.textContent = data.vertical_pos.toFixed(2);
                     focusValue.textContent = data.focus_pos.toFixed(2);
+                    
+                    // Update capture button state
+                    captureButton.disabled = !data.camera_connected;
                 })
                 .catch(error => {
                     console.error('Error:', error);

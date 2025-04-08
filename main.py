@@ -1,14 +1,12 @@
 import pygame
 import time
 import sys
-from config import FRAME_RATE, MOTOR_TYPE
+from config import FRAME_RATE
 from servo_manager import ServoManager
-from stepper_manager import StepperManager
 from camera_manager import CameraManager
 from input_manager import InputManager
 from display_manager import DisplayManager
 from web_camera import WebCameraServer
-from telegram_manager import TelegramManager
 
 def main():
     """Main entry point for the servo camera application"""
@@ -17,23 +15,16 @@ def main():
         pygame.init()
         
         # Initialize managers
-        if MOTOR_TYPE.lower() == 'stepper':
-            print("Using NEMA17 stepper motors")
-            motor_manager = StepperManager()
-        else:
-            print("Using MG996R servos")
-            motor_manager = ServoManager()
-            
+        servo_manager = ServoManager()
         camera_manager = CameraManager()
         input_manager = InputManager()
         display_manager = DisplayManager()
-        telegram_manager = TelegramManager()
         
         # Start web server
-        web_server = WebCameraServer(motor_manager, camera_manager, telegram_manager)
+        web_server = WebCameraServer(servo_manager, camera_manager)
         web_server.start()
         
-        print("Camera Controller started")
+        print("Servo Camera Controller started")
         print("Press Ctrl+C to exit")
         
         # Main loop
@@ -47,8 +38,8 @@ def main():
             # Get control values
             controls = input_manager.get_control_values()
             
-            # Update motor positions
-            motor_manager.update_position(
+            # Update servo positions
+            servo_manager.update_position(
                 horizontal=controls['horizontal'],
                 vertical=controls['vertical'],
                 focus=controls['focus']
@@ -62,10 +53,10 @@ def main():
                 frame=frame,
                 camera_connected=camera_manager.connected,
                 input_manager=input_manager,
-                motor_positions={
-                    'horizontal': motor_manager.horizontal_pos,
-                    'vertical': motor_manager.vertical_pos,
-                    'focus': motor_manager.focus_pos
+                servo_positions={
+                    'horizontal': servo_manager.horizontal_pos,
+                    'vertical': servo_manager.vertical_pos,
+                    'focus': servo_manager.focus_pos
                 }
             )
             
@@ -78,7 +69,7 @@ def main():
         print(f"Error: {e}")
     finally:
         # Clean up resources
-        motor_manager.cleanup()
+        servo_manager.cleanup()
         pygame.quit()
         print("Program terminated")
 

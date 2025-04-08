@@ -2,8 +2,10 @@ import cv2
 import threading
 import time
 import os
-from datetime import datetime
-from config import RTSP_URL, SCREEN_WIDTH, SCREEN_HEIGHT
+from picamera2 import Picamera2
+from picamera2.encoders import JpegEncoder
+from picamera2.outputs import FileOutput
+from config import SCREEN_WIDTH, SCREEN_HEIGHT
 
 class CameraManager:
     def __init__(self):
@@ -11,89 +13,83 @@ class CameraManager:
         self.connected = False
         self.frame = None
         self.frame_lock = threading.Lock()
-        self.capture = None  # Store capture object for direct access
+        self.camera = None
         
-        # Create photos directory if it doesn't exist
-        os.makedirs('photos', exist_ok=True)
+        # Create directory for still images if it doesn't exist
+        os.makedirs('captures', exist_ok=True)
         
         # Start the camera thread
-        self.camera_thread = threading.Thread(target=self._rtsp_stream_thread, daemon=True)
+        self.camera_thread = threading.Thread(target=self._camera_thread, daemon=True)
         self.camera_thread.start()
     
-    def _rtsp_stream_thread(self):
-        """Background thread to capture frames from RTSP stream"""
+    def _camera_thread(self):
+        """Background thread to capture frames from Pi camera"""
         while True:
             try:
-                self.capture = cv2.VideoCapture(RTSP_URL)
-                if not self.capture.isOpened():
-                    print("Cannot open RTSP stream")
-                    time.sleep(5)  # Wait before retrying
-                    continue
+                if self.camera is None:
+                    # Initialize the camera
+                    self.camera = Picamera2()
                     
-                self.connected = True
-                print("RTSP camera connected")
+                    # Configure the camera
+                    config = self.camera.create_preview_configuration(
+                        main={"size": (SCREEN_WIDTH, SCREEN_HEIGHT), "format": "RGB888"}
+                    )
+                    self.camera.configure(config)
+                    self.camera.start()
+                    
+                    self.connected = True
+                    print("Pi camera connected")
                 
-                while True:
-                    ret, new_frame = self.capture.read()
-                    if not ret:
-                        print("Failed to get frame")
-                        break
+                while self.connected:
+                    # Capture frame
+                    frame = self.camera.capture_array()
                     
                     with self.frame_lock:
-                        # Convert to RGB for Pygame
-                        self.frame = cv2.cvtColor(new_frame, cv2.COLOR_BGR2RGB)
-                        self.frame = cv2.resize(self.frame, (SCREEN_WIDTH, SCREEN_HEIGHT))
+                        self.frame = frame
                     
                     time.sleep(0.033)  # ~30fps
                     
             except Exception as e:
-                print(f"RTSP Error: {e}")
-                
-            self.connected = False
-            if self.capture:
-                self.capture.release()
-                self.capture = None
-            time.sleep(5)  # Wait before reconnecting
+                print(f"Camera Error: {e}")
+                self.connected = False
+                if self.camera:
+                    try:
+                        self.camera.stop()
+                    except:
+                        pass
+                    self.camera = None
+                time.sleep(5)  # Wait before reconnecting
     
     def get_frame(self):
         """Get the current camera frame (thread-safe)"""
         with self.frame_lock:
             return self.frame
     
-    def take_photo(self):
-        """
-        Take a full resolution photo and save it to the photos directory
+    def capture_still(self, filename=None):
+        """Capture a still image from the camera"""
+        if not self.connected or self.camera is None:
+            return False, "Camera not connected"
         
-        Returns:
-            str: Path to the saved photo or None if failed
-        """
-        if not self.connected or self.capture is None:
-            print("Cannot take photo: Camera not connected")
-            return None
-            
         try:
-            # Set higher resolution for photo capture
-            # Note: These settings might need to be adjusted based on your camera's capabilities
-            # self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-            # self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+            if filename is None:
+                # Generate filename with timestamp
+                timestamp = time.strftime("%Y%m%d-%H%M%S")
+                filename = f"captures/image_{timestamp}.jpg"
             
-            # Take a photo at full resolution
-            ret, frame = self.capture.read()
-            if not ret:
-                print("Failed to capture photo")
-                return None
-                
-            # Generate filename with timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"photo_{timestamp}.jpg"
-            filepath = os.path.join("photos", filename)
+            # Ensure the captures directory exists
+            os.makedirs('captures', exist_ok=True)
             
-            # Save the image in high quality
-            cv2.imwrite(filepath, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
-            print(f"Photo saved to {filepath}")
-            
-            return filepath
+            # Capture still image
+            self.camera.capture_file(filename, use_video_port=False)
+            return True, filename
             
         except Exception as e:
-            print(f"Error taking photo: {e}")
-            return None 
+            return False, str(e)
+    
+    def __del__(self):
+        """Cleanup when the object is destroyed"""
+        if self.camera:
+            try:
+                self.camera.stop()
+            except:
+                pass 

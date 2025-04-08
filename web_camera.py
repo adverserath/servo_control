@@ -4,15 +4,14 @@ import os
 import cv2
 from flask import Flask, Response, render_template, request, jsonify
 from dotenv import load_dotenv
-from config import RTSP_URL, MOTOR_TYPE
+from config import RTSP_URL
 
 class WebCameraServer:
-    def __init__(self, motor_manager, camera_manager, telegram_manager=None, port=8080):
+    def __init__(self, servo_manager, camera_manager, port=8080):
         self.app = Flask(__name__, template_folder='templates')
         self.port = port
-        self.motor_manager = motor_manager
+        self.servo_manager = servo_manager
         self.camera_manager = camera_manager
-        self.telegram_manager = telegram_manager
         
         # Ensure templates directory exists
         os.makedirs('templates', exist_ok=True)
@@ -91,7 +90,7 @@ class WebCameraServer:
             background-color: #eee;
             border-radius: 5px;
         }
-        .button {
+        .capture-button {
             background-color: #4CAF50;
             border: none;
             color: white;
@@ -104,17 +103,37 @@ class WebCameraServer:
             cursor: pointer;
             border-radius: 5px;
         }
-        .button:hover {
+        .capture-button:hover {
             background-color: #45a049;
+        }
+        .capture-button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .capture-status {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 5px;
+            display: none;
+        }
+        .capture-success {
+            background-color: #dff0d8;
+            color: #3c763d;
+        }
+        .capture-error {
+            background-color: #f2dede;
+            color: #a94442;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Camera Control</h1>
+        <h1>Servo Camera Control</h1>
         
         <div class="video-container">
             <img class="video-feed" src="/video_feed" alt="Camera Feed">
+            <button id="captureButton" class="capture-button">Capture Still Image</button>
+            <div id="captureStatus" class="capture-status"></div>
         </div>
         
         <div class="control-panel">
@@ -140,10 +159,6 @@ class WebCameraServer:
                 </div>
             </div>
             
-            <div class="control-group">
-                <button id="take-photo" class="button">Take Photo</button>
-            </div>
-            
             <div class="status" id="status">
                 Camera status: Connecting...
             </div>
@@ -159,23 +174,24 @@ class WebCameraServer:
         const verticalValue = document.getElementById('vertical-value');
         const focusValue = document.getElementById('focus-value');
         const statusEl = document.getElementById('status');
-        const takePhotoButton = document.getElementById('take-photo');
+        const captureButton = document.getElementById('captureButton');
+        const captureStatus = document.getElementById('captureStatus');
         
-        // Update motor position when sliders change
+        // Update servo position when sliders change
         horizontalSlider.addEventListener('input', updateValues);
         verticalSlider.addEventListener('input', updateValues);
         focusSlider.addEventListener('input', updateValues);
         
-        // Take photo button
-        takePhotoButton.addEventListener('click', takePhoto);
+        // Capture still image when button is clicked
+        captureButton.addEventListener('click', captureStill);
         
-        // Convert slider value (0-100) to motor value (-1 to 1)
-        function sliderToMotor(value) {
+        // Convert slider value (0-100) to servo value (-1 to 1)
+        function sliderToServo(value) {
             return value / 100;
         }
         
-        // Convert motor value (-1 to 1) to slider value (-100 to 100)
-        function motorToSlider(value) {
+        // Convert servo value (-1 to 1) to slider value (-100 to 100)
+        function servoToSlider(value) {
             return value * 100;
         }
         
@@ -193,36 +209,37 @@ class WebCameraServer:
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    horizontal: sliderToMotor(horizontalSlider.value),
-                    vertical: sliderToMotor(verticalSlider.value),
-                    focus: sliderToMotor(focusSlider.value)
+                    horizontal: sliderToServo(horizontalSlider.value),
+                    vertical: sliderToServo(verticalSlider.value),
+                    focus: sliderToServo(focusSlider.value)
                 })
             });
         }
         
-        // Take photo function
-        function takePhoto() {
-            takePhotoButton.disabled = true;
-            takePhotoButton.textContent = 'Taking Photo...';
+        // Capture still image
+        function captureStill() {
+            captureButton.disabled = true;
+            captureStatus.style.display = 'none';
             
-            fetch('/api/take_photo', {
+            fetch('/api/capture', {
                 method: 'POST'
             })
             .then(response => response.json())
             .then(data => {
-                if (data.success) {
-                    statusEl.innerHTML += `<br>Photo taken: ${data.filename}`;
-                } else {
-                    statusEl.innerHTML += `<br>Failed to take photo: ${data.error}`;
-                }
-                takePhotoButton.disabled = false;
-                takePhotoButton.textContent = 'Take Photo';
+                captureStatus.textContent = data.success ? 
+                    `Image captured: ${data.filename}` : 
+                    `Error: ${data.error}`;
+                captureStatus.className = 'capture-status ' + 
+                    (data.success ? 'capture-success' : 'capture-error');
+                captureStatus.style.display = 'block';
             })
             .catch(error => {
-                console.error('Error:', error);
-                statusEl.innerHTML += '<br>Error taking photo';
-                takePhotoButton.disabled = false;
-                takePhotoButton.textContent = 'Take Photo';
+                captureStatus.textContent = `Error: ${error}`;
+                captureStatus.className = 'capture-status capture-error';
+                captureStatus.style.display = 'block';
+            })
+            .finally(() => {
+                captureButton.disabled = false;
             });
         }
         
@@ -234,20 +251,22 @@ class WebCameraServer:
                     // Update status text
                     statusEl.innerHTML = `
                         Camera status: ${data.camera_connected ? 'Connected' : 'Disconnected'}<br>
-                        Motor type: ${data.motor_type}<br>
                         Horizontal: ${data.horizontal_pos.toFixed(2)}<br>
                         Vertical: ${data.vertical_pos.toFixed(2)}<br>
                         Focus: ${data.focus_pos.toFixed(2)}
                     `;
                     
                     // Update sliders without triggering events
-                    horizontalSlider.value = motorToSlider(data.horizontal_pos);
-                    verticalSlider.value = motorToSlider(data.vertical_pos);
-                    focusSlider.value = motorToSlider(data.focus_pos);
+                    horizontalSlider.value = servoToSlider(data.horizontal_pos);
+                    verticalSlider.value = servoToSlider(data.vertical_pos);
+                    focusSlider.value = servoToSlider(data.focus_pos);
                     
                     horizontalValue.textContent = data.horizontal_pos.toFixed(2);
                     verticalValue.textContent = data.vertical_pos.toFixed(2);
                     focusValue.textContent = data.focus_pos.toFixed(2);
+                    
+                    // Update capture button state
+                    captureButton.disabled = !data.camera_connected;
                 })
                 .catch(error => {
                     console.error('Error:', error);
@@ -278,10 +297,9 @@ class WebCameraServer:
         def status():
             return jsonify({
                 'camera_connected': self.camera_manager.connected,
-                'motor_type': MOTOR_TYPE,
-                'horizontal_pos': self.motor_manager.horizontal_pos,
-                'vertical_pos': self.motor_manager.vertical_pos,
-                'focus_pos': self.motor_manager.focus_pos
+                'horizontal_pos': self.servo_manager.horizontal_pos,
+                'vertical_pos': self.servo_manager.vertical_pos,
+                'focus_pos': self.servo_manager.focus_pos
             })
         
         @self.app.route('/api/control', methods=['POST'])
@@ -289,46 +307,29 @@ class WebCameraServer:
             data = request.json
             
             if 'horizontal' in data:
-                self.motor_manager.update_position(horizontal=float(data['horizontal']))
+                self.servo_manager.update_position(horizontal=float(data['horizontal']))
                 
             if 'vertical' in data:
-                self.motor_manager.update_position(vertical=float(data['vertical']))
+                self.servo_manager.update_position(vertical=float(data['vertical']))
                 
             if 'focus' in data:
-                self.motor_manager.update_position(focus=float(data['focus']))
+                self.servo_manager.update_position(focus=float(data['focus']))
             
             return jsonify({
                 'success': True,
-                'horizontal_pos': self.motor_manager.horizontal_pos,
-                'vertical_pos': self.motor_manager.vertical_pos,
-                'focus_pos': self.motor_manager.focus_pos
+                'horizontal_pos': self.servo_manager.horizontal_pos,
+                'vertical_pos': self.servo_manager.vertical_pos,
+                'focus_pos': self.servo_manager.focus_pos
             })
-            
-        @self.app.route('/api/take_photo', methods=['POST'])
-        def take_photo():
-            try:
-                # Take a photo at full resolution
-                photo_path = self.camera_manager.take_photo()
-                
-                if photo_path:
-                    # Send to Telegram if configured
-                    if self.telegram_manager and self.telegram_manager.is_configured:
-                        self.telegram_manager.send_photo_async(photo_path)
-                    
-                    return jsonify({
-                        'success': True,
-                        'filename': os.path.basename(photo_path)
-                    })
-                else:
-                    return jsonify({
-                        'success': False,
-                        'error': 'Failed to capture photo'
-                    })
-            except Exception as e:
-                return jsonify({
-                    'success': False,
-                    'error': str(e)
-                })
+        
+        @self.app.route('/api/capture', methods=['POST'])
+        def capture():
+            success, result = self.camera_manager.capture_still()
+            return jsonify({
+                'success': success,
+                'filename': result if success else None,
+                'error': None if success else result
+            })
     
     def _generate_frames(self):
         """Generate frames for MJPEG streaming"""

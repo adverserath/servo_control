@@ -1,50 +1,35 @@
-# Camera Control System
+# Stepper Motor Controller
 
-This project implements a camera control system using either MG996R servos or NEMA17 stepper motors on a Raspberry Pi. It allows you to control three motors (horizontal, vertical, and focus) using the analog sticks and triggers of an Xbox controller or through a web interface.
+This project implements a stepper motor control system using an Xbox controller on a Raspberry Pi. It allows you to control three NEMA17 stepper motors (horizontal, vertical, and focus) using the analog sticks and triggers of an Xbox controller.
 
 ## Hardware Requirements
 
 - Raspberry Pi (any model with GPIO pins)
-- Either:
-  - 3x MG996R servos, or
-  - 3x NEMA17 stepper motors with drivers (A4988 or DRV8825 recommended)
+- 3x NEMA17 stepper motors
+- 3x Stepper motor drivers (A4988 or DRV8825 recommended)
 - Xbox controller (wired or wireless with adapter)
-- Jumper wires for connecting motors to GPIO pins
-- Power supply for motors (12V recommended for steppers, 5V for servos)
-- RTSP camera
+- Jumper wires for connecting stepper drivers to GPIO pins
+- Power supply for stepper motors (12V recommended)
 
 ## Pin Configuration
 
-### MG996R Servos
-- Horizontal Servo (Azimuth): GPIO 17
-- Vertical Servo (Elevation): GPIO 18
-- Focus Servo: GPIO 27
-
-### NEMA17 Stepper Motors
-#### Horizontal Stepper (Azimuth)
+### Horizontal Stepper (Azimuth)
 - Step Pin: GPIO 17
 - Direction Pin: GPIO 27
 - Enable Pin: GPIO 22
 
-#### Vertical Stepper (Elevation)
+### Vertical Stepper (Elevation)
 - Step Pin: GPIO 18
 - Direction Pin: GPIO 23
 - Enable Pin: GPIO 24
 
-#### Focus Stepper
+### Focus Stepper
 - Step Pin: GPIO 25
 - Direction Pin: GPIO 8
 - Enable Pin: GPIO 7
 
 ## Wiring Instructions
 
-### For MG996R Servos
-1. Connect each servo to the Raspberry Pi:
-   - Signal wire → corresponding GPIO pin
-   - Power wire → 5V from Raspberry Pi or external power supply
-   - Ground wire → Raspberry Pi GND
-
-### For NEMA17 Stepper Motors
 1. Connect each stepper motor driver to the Raspberry Pi:
    - STEP pin → corresponding GPIO pin
    - DIR pin → corresponding GPIO pin
@@ -62,10 +47,6 @@ This project implements a camera control system using either MG996R servos or NE
 - Python 3.x
 - pygame
 - RPi.GPIO
-- Flask
-- OpenCV
-- python-dotenv
-- requests
 
 ## Installation
 
@@ -75,86 +56,27 @@ This project implements a camera control system using either MG996R servos or NE
    pip install -r requirements.txt
    ```
 
-## Configuration
-
-1. Edit the `.env` file to configure your system:
-   ```
-   # RTSP Camera Settings
-   RTSP_URL=rtsp://username:password@camera-ip-address:port/stream
-   
-   # Motor type selection (servo or stepper)
-   MOTOR_TYPE=servo
-   
-   # Servo settings
-   SERVO_HORIZONTAL_PIN=17
-   SERVO_VERTICAL_PIN=18
-   SERVO_FOCUS_PIN=27
-   
-   # Stepper motor settings
-   STEPPER_H_STEP_PIN=17
-   STEPPER_H_DIR_PIN=27
-   STEPPER_H_EN_PIN=22
-   
-   STEPPER_V_STEP_PIN=18
-   STEPPER_V_DIR_PIN=23
-   STEPPER_V_EN_PIN=24
-   
-   STEPPER_F_STEP_PIN=25
-   STEPPER_F_DIR_PIN=8
-   STEPPER_F_EN_PIN=7
-   
-   STEPPER_DELAY=0.001
-   
-   # Telegram settings
-   TELEGRAM_BOT_TOKEN=your_bot_token_here
-   TELEGRAM_CHAT_ID=your_chat_id_here
-   ```
-
-2. For Telegram integration, you need to:
-   - Create a bot using BotFather on Telegram
-   - Get your bot token
-   - Get your chat ID (you can use @userinfobot)
-   - Add these to your .env file
-
 ## Usage
 
-1. Connect your motors to the specified GPIO pins
-2. Connect your Xbox controller to the Raspberry Pi (optional)
+1. Connect your stepper motors and drivers to the specified GPIO pins
+2. Connect your Xbox controller to the Raspberry Pi
 3. Run the script:
    ```bash
-   python main.py
+   python stepper_controller.py
    ```
 
 ## Controls
 
-### Xbox Controller
-- Left Stick Horizontal: Controls horizontal movement
-- Left Stick Vertical: Controls vertical movement
-- Right Trigger: Controls focus movement
-
-### Keyboard (when no controller is connected)
-- Arrow keys: Control horizontal and vertical movement
-- A/D keys: Control focus movement
-
-### Web Interface
-- Access the web interface at `http://[raspberry-pi-ip]:8080`
-- Use sliders to control motor positions
-- Click "Take Photo" to capture a full-resolution photo and send it to Telegram
-
-## Photo Capture and Telegram Integration
-
-The system now includes the ability to take full-resolution photos and send them to a Telegram chat:
-
-1. Configure your Telegram bot token and chat ID in the `.env` file
-2. Use the "Take Photo" button in the web interface to capture a photo
-3. The photo will be saved to the `photos` directory and sent to your Telegram chat
+- Left Stick Horizontal: Controls horizontal stepper movement
+- Left Stick Vertical: Controls vertical stepper movement
+- Right Trigger: Controls focus stepper movement
 
 ## Safety Notes
 
-- Ensure proper power supply for your motors
+- Ensure proper power supply for your stepper motors
 - Double-check all connections before powering on
 - Always use a clean shutdown (Ctrl+C) to stop the program
-- Stepper motors are automatically disabled when not moving to prevent overheating
+- The motors are automatically disabled when not moving to prevent overheating
 
 ## License
 
@@ -162,7 +84,7 @@ This project is open source and available under the MIT License.
 
 ## RTSP Camera Integration
 
-The system includes integration with an RTSP camera stream. This allows you to view the camera feed while controlling the motors.
+The servo controller now includes integration with an RTSP camera stream. This allows you to view the camera feed while controlling the servos.
 
 ### Setting Up the RTSP Stream
 
@@ -177,6 +99,20 @@ The system includes integration with an RTSP camera stream. This allows you to v
    - Dahua: `rtsp://username:password@192.168.1.100:554/cam/realmonitor?channel=1&subtype=0`
    - Axis: `rtsp://username:password@192.168.1.100:554/axis-media/media.amp`
 
+2. Install the required dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+
+### Using the Camera View
+
+When you run `servo_controller.py`, the RTSP camera feed will be displayed in the pygame window. The servo controls work as before, but now you can see what the camera is pointing at.
+
+- If a joystick is connected, it will be used for controlling the servos.
+- If no joystick is detected, you can use keyboard controls:
+  - Arrow keys: Control horizontal and vertical servos
+  - A/D keys: Control focus servo
+
 ### Troubleshooting RTSP Connection
 
 If you're having trouble connecting to your RTSP camera:
@@ -187,19 +123,17 @@ If you're having trouble connecting to your RTSP camera:
 4. Check your network connectivity to the camera
 5. Some cameras require specific path formats for their RTSP streams - check your camera's documentation
 
-## Code Structure
+## Refactored Code Structure
 
-The project has a modular structure:
+The project has been refactored into a modular structure:
 
 - `main.py` - Main entry point that coordinates all components
 - `config.py` - Configuration settings and constants
 - `servo_manager.py` - Handles servo motor control
-- `stepper_manager.py` - Handles stepper motor control
-- `camera_manager.py` - Manages the RTSP camera feed and photo capture
+- `camera_manager.py` - Manages the RTSP camera feed
 - `input_manager.py` - Processes joystick and keyboard input
 - `display_manager.py` - Handles the pygame display and UI
 - `web_camera.py` - Provides a web interface for remote control
-- `telegram_manager.py` - Handles sending photos to Telegram
 
 ### Running the Application
 
@@ -210,7 +144,21 @@ python main.py
 ```
 
 This will:
-1. Start the motor control system with pygame display
+1. Start the servo control system with pygame display
 2. Connect to the RTSP camera stream
 3. Start a web server on port 8080 for remote control
-4. Initialize Telegram integration if configured 
+
+### Web Interface
+
+The application includes a web interface that can be accessed at:
+
+```
+http://[raspberry-pi-ip]:8080
+```
+
+This allows you to:
+- View the camera feed in your browser
+- Control the servo positions using sliders
+- See the current status of the system
+
+The web interface works on desktop and mobile browsers, making it easy to control your servos from any device. 
