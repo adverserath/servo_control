@@ -20,6 +20,7 @@ class InputManager:
                                platform.machine().startswith('arm'))
         
         # Initialize pygame if not already initialized
+        self.has_joystick = False
         try:
             import pygame
             if not pygame.get_init():
@@ -31,6 +32,7 @@ class InputManager:
             if pygame.joystick.get_count() > 0:
                 self.joystick = pygame.joystick.Joystick(0)
                 self.joystick.init()
+                self.has_joystick = True
                 logger.info(f"Joystick initialized: {self.joystick.get_name()}")
             else:
                 logger.warning("No joystick found")
