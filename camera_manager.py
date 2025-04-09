@@ -18,16 +18,24 @@ try:
     from libcamera import controls, Transform, StreamFormat # For controls and formats
     from picamera2.utils import Quality # Enum for recording quality
     picamera2_available = True
+    print("DEBUG: picamera2 imported successfully.") # DEBUG
 except ImportError:
     picamera2_available = False
-    print("Info: picamera2 module not found. Pi Camera support disabled.")
+    print("DEBUG: picamera2 import FAILED (ImportError).") # DEBUG
 except Exception as e:
     picamera2_available = False
-    print(f"Warning: Error importing picamera2: {e}. Pi Camera support disabled.")
+    print(f"DEBUG: picamera2 import FAILED (Other Exception: {e}).") # DEBUG
+    # Optionally print traceback here too for import errors
+    # import traceback
+    # traceback.print_exc()
 
 IS_RASPBERRY_PI = (platform.system() == 'Linux' and 
                    os.path.exists('/proc/device-tree/model') and 
                    'raspberry pi' in open('/proc/device-tree/model', 'r').read().lower())
+
+# DEBUG: Print initial detection status
+print(f"DEBUG: IS_RASPBERRY_PI = {IS_RASPBERRY_PI}")
+print(f"DEBUG: picamera2_available = {picamera2_available}")
 
 if IS_RASPBERRY_PI:
     print("Info: Detected Raspberry Pi system.")
@@ -65,15 +73,21 @@ class CameraManager:
         # --- Determine Camera Type and Initialize ONCE --- 
         initialization_success = False
         try:
+            # DEBUG: Print values used for decision
+            print(f"DEBUG: Checking camera type: IS_RASPBERRY_PI={IS_RASPBERRY_PI}, picamera2_available={picamera2_available}")
             use_pi_camera = IS_RASPBERRY_PI and picamera2_available
             if use_pi_camera:
                 print("Attempting Pi Camera initialization...")
                 self._init_pi_camera() # This sets self.connected, self.error
             else:
+                # Add specific reason log here
                 if not IS_RASPBERRY_PI:
-                     print("Not on Raspberry Pi, trying webcam...")
+                     reason = "Not on Raspberry Pi"
                 elif not picamera2_available:
-                     print("Picamera2 library not available/functional, trying webcam...")
+                     reason = "Picamera2 library not available/functional"
+                else:
+                     reason = "Unknown"
+                print(f"DEBUG: Condition for Pi Camera not met ({reason}). Falling back to webcam...")
                 self._init_webcam() # This sets self.connected, self.error
             
             initialization_success = self.connected
@@ -223,7 +237,15 @@ class CameraManager:
             test_ret, _ = self.camera.read()
             if not test_ret:
                  # If read fails immediately, likely permissions or device issue
-                 raise IOError("Webcam opened but failed to read initial frame. Check permissions/device.")
+                 error_msg = "Webcam opened but failed to read initial frame."
+                 print(f"ERROR: {error_msg}")
+                 print("TROUBLESHOOTING HINTS:")
+                 print("  1. Check permissions: Run 'ls -l /dev/video*' in terminal.")
+                 print("     Your user needs read/write access (often via 'video' group).")
+                 print("     If needed, run 'sudo usermod -a -G video $USER' then LOG OUT and back in.")
+                 print("  2. Check if another application is using the webcam.")
+                 print("  3. Ensure the webcam is securely connected and functional.")
+                 raise IOError(error_msg + " Check permissions/device.")
             else:
                  print("Successfully read initial test frame from webcam.")
                  
