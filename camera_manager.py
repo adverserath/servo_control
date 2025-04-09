@@ -105,28 +105,41 @@ class CameraManager:
                 # Fallback to OpenCV with Pi's camera device
                 print("PiCamera2 not available, falling back to OpenCV with Pi's camera device")
                 
-                # Use the Pi's camera device (usually /dev/video0)
-                self.camera = cv2.VideoCapture(0)
+                # Try different video devices
+                video_devices = [0, 1, 10, 11, 12, 13, 14, 15, 16, 18, 19, 20, 21, 22, 23, 31]
+                for device_id in video_devices:
+                    print(f"Trying video device /dev/video{device_id}")
+                    self.camera = cv2.VideoCapture(device_id)
+                    
+                    if self.camera.isOpened():
+                        # Test if we can read a frame
+                        ret, frame = self.camera.read()
+                        if ret:
+                            print(f"Successfully connected to video device /dev/video{device_id}")
+                            
+                            # Set camera properties
+                            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
+                            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
+                            self.camera.set(cv2.CAP_PROP_FPS, self.fps)
+                            
+                            # Start capture thread
+                            self.is_running = True
+                            self.capture_thread = threading.Thread(target=self._capture_loop)
+                            self.capture_thread.daemon = True
+                            self.capture_thread.start()
+                            
+                            self.is_connected = True
+                            self.connection_error = None
+                            print(f"Successfully connected to Raspberry Pi camera using OpenCV with device /dev/video{device_id}")
+                            return True
+                        else:
+                            print(f"Failed to read frame from video device /dev/video{device_id}")
+                            self.camera.release()
+                    else:
+                        print(f"Failed to open video device /dev/video{device_id}")
                 
-                if not self.camera.isOpened():
-                    self.connection_error = "Failed to open camera device"
-                    return False
-                
-                # Set camera properties
-                self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
-                self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
-                self.camera.set(cv2.CAP_PROP_FPS, self.fps)
-                
-                # Start capture thread
-                self.is_running = True
-                self.capture_thread = threading.Thread(target=self._capture_loop)
-                self.capture_thread.daemon = True
-                self.capture_thread.start()
-                
-                self.is_connected = True
-                self.connection_error = None
-                print("Successfully connected to Raspberry Pi camera using OpenCV")
-                return True
+                self.connection_error = "Failed to connect to any video device"
+                return False
             
         except Exception as e:
             self.connection_error = str(e)
