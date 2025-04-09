@@ -12,6 +12,11 @@ from config import SCREEN_WIDTH, SCREEN_HEIGHT, FRAME_RATE
 # Try importing picamera2, handle failure gracefully
 try:
     from picamera2 import Picamera2
+    # Import encoder and quality enums for recording
+    from picamera2.encoders import H264Encoder
+    from picamera2.outputs import FileOutput # For potentially smoother recording
+    from libcamera import controls, Transform, StreamFormat # For controls and formats
+    from picamera2.utils import Quality # Enum for recording quality
     picamera2_available = True
 except ImportError:
     picamera2_available = False
@@ -43,9 +48,9 @@ class CameraManager:
         self.capture_dir = "captures"
         os.makedirs(self.capture_dir, exist_ok=True)
         self.is_recording = False
-        self.video_writer = None
         self.recording_filename = None
         self.recording_lock = threading.Lock()
+        self.encoder = None # Store encoder instance
         
         # Start the camera thread (handles PiCam/Webcam)
         self.running = True
@@ -85,7 +90,7 @@ class CameraManager:
             self._cleanup_camera_object() # Clean up if init failed
             return # Exit the thread
 
-        print(f"Camera thread: {self.camera_type} initialized successfully. Entering capture loop.")
+        print(f"Camera thread: {self.camera_type} initialized successfully. Entering LORES capture loop.")
         
         # --- Capture Loop (Only runs if init succeeded) ---
         while self.running:
@@ -96,36 +101,36 @@ class CameraManager:
                 break # Exit capture loop
                 
             try:
-                if self.connected and self.camera is not None:
-                    frame_data = self._capture_frame()
-                    if frame_data is not None:
-                        # --- Store the captured frame (likely RGB from PiCam) --- 
-                        with self.frame_lock:
-                            self.frame = frame_data 
-                        self.error = None # Clear error on successful frame
-                        
-                        # Write frame if recording
-                        with self.recording_lock:
-                            if self.is_recording and self.video_writer:
-                                # Ensure frame is in BGR format for VideoWriter
-                                if self.camera_type == "Raspberry Pi Camera":
-                                    # Picamera2 configured for RGB888, convert to BGR for saving
-                                    # print("Converting frame to BGR for recording...") # Debug print
-                                    try:
-                                        bgr_frame = cv2.cvtColor(frame_data, cv2.COLOR_RGB2BGR)
-                                        self.video_writer.write(bgr_frame)
-                                    except cv2.error as cv_err:
-                                        print(f"OpenCV error during BGR conversion for recording: {cv_err}")
-                                        # Optionally stop recording or handle error
-                                else: # Webcam likely BGR already from OpenCV
-                                    self.video_writer.write(frame_data)
-                    else:
-                         # Failed to capture frame - exit loop
-                         print(f"Failed to capture frame using {self.camera_type}. Camera thread exiting.")
-                         self.error = "Failed to capture frame."
-                         break # Exit capture loop
+                # Capture from the low-resolution stream for preview
+                frame_data = self._capture_frame("lores") 
                 
-                # Frame rate handled by sleep
+                if frame_data is not None:
+                    processed_frame = None
+                    # --- Convert frame for storage/display (expecting BGR) --- 
+                    if self.camera_type == "Raspberry Pi Camera":
+                        # Lores stream is YUV420, convert to BGR
+                        try:
+                            processed_frame = cv2.cvtColor(frame_data, cv2.COLOR_YUV420p_to_BGR) # Or COLOR_YUV2BGR_I420 if needed
+                        except cv2.error as cv_err:
+                            print(f"OpenCV error converting lores YUV420->BGR: {cv_err}")
+                            # Fallback or handle error - maybe skip frame?
+                            continue
+                    elif self.camera_type == "Webcam": # Webcam is likely BGR already
+                        processed_frame = frame_data
+                    else: # Should not happen
+                        continue 
+                    # --- End Conversion --- 
+
+                    if processed_frame is not None:
+                        with self.frame_lock:
+                            self.frame = processed_frame # Store the BGR frame
+                        self.error = None
+                    # No video writing logic here anymore
+                else:
+                     print(f"Failed to capture lores frame using {self.camera_type}. Camera thread exiting.")
+                     self.error = "Failed to capture lores frame."
+                     break # Exit capture loop
+                
                 time.sleep(max(0.001, 1.0 / FRAME_RATE)) 
                     
             except Exception as e:
@@ -142,7 +147,7 @@ class CameraManager:
         print("Camera thread finished cleanup.")
 
     def _init_pi_camera(self):
-        """Initialize the Raspberry Pi camera using picamera2"""
+        """Initialize Pi camera with full-res main stream and low-res preview stream"""
         if not picamera2_available:
             self.error = "picamera2 module not available."
             self.connected = False
@@ -152,36 +157,33 @@ class CameraManager:
             self._cleanup_camera_object() # Ensure any previous instance is closed
             self.camera = Picamera2()
             
-            # --- Use Preview Configuration with Size --- 
-            print(f"Attempting preview configuration with size {SCREEN_WIDTH}x{SCREEN_HEIGHT}...")
-            # Specify main stream size and potentially format (e.g., RGB888)
-            config = self.camera.create_preview_configuration(
-                main={"size": (SCREEN_WIDTH, SCREEN_HEIGHT), "format": "RGB888"} 
-                # Add other streams if needed, e.g., lores for low-res stream
-                # lores={"size": (320, 240)}, display="lores"
+            # --- Configure Full-Res Main and Low-Res Lores Streams --- 
+            print(f"Attempting video configuration... Preview: {SCREEN_WIDTH}x{SCREEN_HEIGHT}")
+            # Main stream: Use sensor's full resolution (omit size). RGB888 for stills.
+            # Lores stream: For preview/web stream. YUV420 is efficient.
+            config = self.camera.create_video_configuration(
+                main={"format": "RGB888"}, # Full resolution for stills/recording source
+                lores={"size": (SCREEN_WIDTH, SCREEN_HEIGHT), "format": "YUV420"},
+                controls={"FrameRate": float(FRAME_RATE)} # Set frame rate
             )
-            print(f"Configuration created: {config}") # Print the config dict
-            # --- End Preview Configuration ---
+            print(f"Initial Configuration created: {config}")
+            
+            # Optional: Align lores stream size if necessary (e.g., to hardware constraints)
+            # self.camera.align_configuration(config)
+            # print(f"Aligned Configuration: {config}")
             
             # Apply the configuration
             print("Configuring Pi Camera...")
             self.camera.configure(config)
             print("Configuration applied.")
 
-            # Optional: Add transformations AFTER configure/start if needed
-            # self.camera.options['transform'] = libcamera.Transform(hflip=1, vflip=1) # Old method, likely wrong
-            # New method (preferred): Use controls AFTER start()
-            # controls = {"hflip": 0, "vflip": 0} # 0=False, 1=True
-            # self.camera.set_controls(controls)
-            
+            # Set display stream to lores (important!)
+            self.camera.display_stream_name = "lores"
+            print(f"Using '{self.camera.display_stream_name}' stream for preview.")
+
             print("Starting Pi Camera...")
             self.camera.start()
             print("Pi Camera started.")
-
-            # Optional: Apply controls like flip *after* starting
-            # controls = {"hflip": 0, "vflip": 0} # Example: No flip
-            # self.camera.set_controls(controls)
-            # print("Applied controls (flip/rotate).")
             
             self.connected = True
             self.error = None
@@ -246,14 +248,16 @@ class CameraManager:
             if self.camera: self.camera.release()
             self.camera = None
 
-    def _capture_frame(self):
-        """Capture a single frame from the active camera"""
+    def _capture_frame(self, stream_name="lores"):
+        """Capture a single frame from the specified camera stream"""
         if not self.connected or self.camera is None:
             return None
         try:
             if self.camera_type == "Raspberry Pi Camera":
-                # Capture frame from picamera2 (already RGB)
-                frame = self.camera.capture_array()
+                # Capture frame from picamera2 from the specified stream
+                # capture_array defaults to the 'display_stream_name' if stream_name is None
+                frame = self.camera.capture_array(stream_name)
+                # print(f"Captured {stream_name} frame. Shape: {frame.shape}, Dtype: {frame.dtype}") # Debug
                 return frame
             elif self.camera_type == "Webcam":
                 # Capture frame from OpenCV VideoCapture
@@ -272,96 +276,99 @@ class CameraManager:
             return None
             
     def get_frame(self):
-        """Get the current camera frame (RGB format preferred for display)"""
+        """Get the current preview camera frame (should be BGR)"""
         with self.frame_lock:
             if self.frame is None:
                 return None
-            # Ensure the frame is in RGB for consistency if needed elsewhere
-            # Currently, PiCam is RGB, Webcam is BGR. Decide on standard.
-            # Let's return raw frame for now, convert later if needed.
             return self.frame.copy() # Return a copy
             
     def capture_still(self):
-        """Capture a still image (saves as JPG)"""
-        frame_data = self.get_frame() # Gets a copy
-        if frame_data is not None:
-            timestamp = time.strftime("%Y%m%d-%H%M%S")
-            filename = os.path.join(self.capture_dir, f"capture_{timestamp}.jpg")
-            try:
-                # OpenCV imwrite expects BGR format.
-                if self.camera_type == "Raspberry Pi Camera":
-                    # Convert RGB frame from PiCam to BGR for saving
-                    save_frame = cv2.cvtColor(frame_data, cv2.COLOR_RGB2BGR)
-                else: # Webcam frame is already BGR
-                    save_frame = frame_data
-                    
+        """Capture a full-resolution still image (saves as JPG)"""
+        if not self.connected or self.camera is None or self.camera_type != "Raspberry Pi Camera":
+             return False, "Pi Camera not connected or available for full-res capture."
+        
+        print("Capturing full-resolution still (main stream)...")
+        try:
+            # Capture from the main stream explicitly
+            frame_data = self._capture_frame("main") # RGB888 format expected
+            if frame_data is not None:
+                timestamp = time.strftime("%Y%m%d-%H%M%S")
+                filename = os.path.join(self.capture_dir, f"capture_{timestamp}.jpg")
+                # Convert RGB frame from PiCam main stream to BGR for saving
+                save_frame = cv2.cvtColor(frame_data, cv2.COLOR_RGB2BGR)
                 cv2.imwrite(filename, save_frame)
-                print(f"Image captured: {filename}")
+                print(f"Full-res image captured: {filename}")
                 return True, filename
-            except Exception as e:
-                error_msg = f"Failed to save image: {e}"
-                print(error_msg)
-                return False, error_msg
-        else:
-            return False, "No frame available to capture."
+            else:
+                return False, "Failed to capture main stream frame."
+        except Exception as e:
+            error_msg = f"Failed to save full-res image: {e}"
+            print(error_msg)
+            import traceback
+            traceback.print_exc()
+            return False, error_msg
             
     def start_recording(self):
-        """Start recording video (saves as MP4)"""
+        """Start recording video using picamera2's H264Encoder"""
+        if not self.connected or self.camera is None or self.camera_type != "Raspberry Pi Camera":
+             return False, "Pi Camera not connected or available for recording."
+             
         with self.recording_lock:
             if self.is_recording:
                 return False, "Already recording."
             
-            # Use the raw frame from get_frame() to get dimensions
-            frame_data = self.get_frame()
-            if frame_data is None:
-                return False, "No frame available to start recording."
-
             timestamp = time.strftime("%Y%m%d-%H%M%S")
-            self.recording_filename = os.path.join(self.capture_dir, f"video_{timestamp}.mp4")
-            
-            # Get frame dimensions (height, width)
-            height, width, _ = frame_data.shape
-            
-            # Define the codec and create VideoWriter object (using mp4v for MP4)
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
-            
-            # Use FRAME_RATE from config as FPS
-            fps = float(FRAME_RATE)
-            print(f"Starting recording at {fps:.1f} FPS, dimensions {width}x{height}")
+            # Output raw H.264 video stream
+            self.recording_filename = os.path.join(self.capture_dir, f"video_{timestamp}.h264") 
             
             try:
-                # VideoWriter expects (width, height)
-                self.video_writer = cv2.VideoWriter(self.recording_filename, fourcc, fps, (width, height))
-                if not self.video_writer.isOpened():
-                     raise IOError(f"Could not open video writer for file: {self.recording_filename}")
+                # Create an encoder instance (e.g., 10Mbps bitrate)
+                # Quality setting might override bitrate, check documentation
+                self.encoder = H264Encoder(bitrate=10000000)
+                print(f"Starting H.264 recording to {self.recording_filename} at ~{FRAME_RATE}fps, quality VERY_HIGH...")
+                
+                # Use start_recording - this uses the 'main' stream by default for video config
+                self.camera.start_recording(self.encoder, self.recording_filename, quality=Quality.VERY_HIGH)
+                
                 self.is_recording = True
                 print(f"Started recording: {self.recording_filename}")
                 return True, self.recording_filename
+                
             except Exception as e:
-                error_msg = f"Failed to start recording: {e}"
+                error_msg = f"Failed to start H.264 recording: {e}"
                 print(error_msg)
-                self.video_writer = None
+                import traceback
+                traceback.print_exc()
                 self.recording_filename = None
+                self.encoder = None
                 return False, error_msg
 
     def stop_recording(self):
+        """Stop recording video"""
+        if not self.connected or self.camera is None or self.camera_type != "Raspberry Pi Camera":
+             return False, "Pi Camera not available to stop recording."
+             
         with self.recording_lock:
             if not self.is_recording:
                 return False, "Not currently recording."
             
-            if self.video_writer:
-                self.video_writer.release()
-                print(f"Stopped recording: {self.recording_filename}")
+            try:
+                print(f"Stopping recording: {self.recording_filename}")
+                self.camera.stop_recording()
                 recorded_file = self.recording_filename
-                self.video_writer = None
-                self.recording_filename = None
                 self.is_recording = False
+                self.recording_filename = None
+                self.encoder = None # Clear encoder instance
+                print("Stopped recording successfully.")
                 return True, recorded_file
-            else:
-                # Should not happen if is_recording is True, but handle defensively
-                self.is_recording = False
+            except Exception as e:
+                error_msg = f"Error stopping recording: {e}"
+                print(error_msg)
+                # Attempt to mark as not recording anyway
+                self.is_recording = False 
                 self.recording_filename = None
-                return False, "Recording was active but writer was not found."
+                self.encoder = None
+                return False, error_msg
 
     def toggle_recording(self):
          with self.recording_lock:
