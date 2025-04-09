@@ -1,131 +1,162 @@
 import os
+import sys
 import time
 import threading
-import cv2
-import pygame
-import asyncio
-import urllib.parse
-from flask import Flask, Response, render_template, request, jsonify, send_from_directory
-from dotenv import load_dotenv
-import RPi.GPIO as GPIO
-from config import SCREEN_WIDTH, SCREEN_HEIGHT, HORIZONTAL_PIN, VERTICAL_PIN, FOCUS_PIN, PWM_FREQ, FRAME_RATE
-from motor_controller import create_motor_controller
+import logging
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from camera_manager import CameraManager
-from servo_manager import ServoManager
+from servo_controller import ServoController
 from input_manager import InputManager
-from telegram_sender import send_photo_to_telegram
+from config import SCREEN_WIDTH, SCREEN_HEIGHT, FRAME_RATE
 
-# Load environment variables
-load_dotenv()
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-# Handle XDG_RUNTIME_DIR issue on Raspberry Pi OS
-if not os.environ.get('XDG_RUNTIME_DIR'):
-    # Create runtime directory in user's home directory
-    home_dir = os.path.expanduser('~')
-    runtime_dir = os.path.join(home_dir, '.runtime')
-    os.makedirs(runtime_dir, exist_ok=True)
-    os.environ['XDG_RUNTIME_DIR'] = runtime_dir
+class CameraStreamHandler(BaseHTTPRequestHandler):
+    def __init__(self, *args, **kwargs):
+        self.camera_manager = kwargs.pop('camera_manager', None)
+        self.servo_controller = kwargs.pop('servo_controller', None)
+        self.input_manager = kwargs.pop('input_manager', None)
+        super().__init__(*args, **kwargs)
 
-app = Flask(__name__)
+    def do_GET(self):
+        if self.path == '/':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(self._get_html().encode())
+        elif self.path == '/stream':
+            self.send_response(200)
+            self.send_header('Content-type', 'multipart/x-mixed-replace; boundary=frame')
+            self.end_headers()
+            self._stream_camera()
+        elif self.path == '/status':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            status = {
+                'camera': self.camera_manager.get_status(),
+                'servo': self.servo_controller.get_status(),
+                'input': self.input_manager.get_status()
+            }
+            self.wfile.write(str(status).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
 
-# Camera Configuration
+    def _stream_camera(self):
+        """Stream camera frames to the client."""
+        try:
+            while True:
+                success, frame_bytes = self.camera_manager.get_frame()
+                if not success:
+                    time.sleep(0.1)
+                    continue
 
-# Setup GPIO
-GPIO.setmode(GPIO.BCM)
-GPIO.setwarnings(False)
+                # Send frame
+                self.wfile.write(b'--frame\r\n')
+                self.send_header('Content-Type', 'image/jpeg')
+                self.send_header('Content-Length', len(frame_bytes))
+                self.end_headers()
+                self.wfile.write(frame_bytes)
+                self.wfile.write(b'\r\n')
 
-GPIO.setup(HORIZONTAL_PIN, GPIO.OUT)
-GPIO.setup(VERTICAL_PIN, GPIO.OUT)
-GPIO.setup(FOCUS_PIN, GPIO.OUT)
+                # Control frame rate
+                time.sleep(1.0 / FRAME_RATE)
 
-pwm_horizontal = GPIO.PWM(HORIZONTAL_PIN, PWM_FREQ)
-pwm_vertical = GPIO.PWM(VERTICAL_PIN, PWM_FREQ)
-pwm_focus = GPIO.PWM(FOCUS_PIN, PWM_FREQ)
+        except Exception as e:
+            logger.error(f"Error in camera stream: {e}")
+            return
 
-pwm_horizontal.start(0)
-pwm_vertical.start(0)
-pwm_focus.start(0)
-
-# Current servo positions (normalized -1 to 1)
-horizontal_pos = 0
-vertical_pos = 0
-focus_pos = 0
-
-# Generate frames for MJPEG stream
-def generate_frames():
-    global frame
-    
-    while True:
-        with frame_lock:
-            if frame is not None:
-                # Encode frame as JPEG
-                _, buffer = cv2.imencode('.jpg', frame)
-                jpg_bytes = buffer.tobytes()
+    def _get_html(self):
+        """Return the HTML page for the camera stream."""
+        return """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Camera Stream</title>
+            <style>
+                body { margin: 0; padding: 20px; background: #1a1a1a; color: #fff; font-family: Arial, sans-serif; }
+                .container { max-width: 1200px; margin: 0 auto; }
+                .video-container { margin: 20px 0; text-align: center; }
+                img { max-width: 100%; height: auto; border: 2px solid #333; }
+                .status { margin: 20px 0; padding: 15px; background: #333; border-radius: 5px; }
+                .controls { margin: 20px 0; }
+                button { padding: 10px 20px; margin: 5px; background: #4CAF50; border: none; color: white; cursor: pointer; }
+                button:hover { background: #45a049; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>Camera Stream</h1>
+                <div class="video-container">
+                    <img src="/stream" alt="Camera Stream">
+                </div>
+                <div class="status" id="status">
+                    Loading status...
+                </div>
+                <div class="controls">
+                    <button onclick="toggleRecording()">Toggle Recording</button>
+                </div>
+            </div>
+            <script>
+                function updateStatus() {
+                    fetch('/status')
+                        .then(response => response.json())
+                        .then(data => {
+                            document.getElementById('status').innerHTML = 
+                                '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+                        });
+                }
                 
-                # Yield for MJPEG streaming
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + jpg_bytes + b'\r\n')
-        
-        time.sleep(0.033)  # ~30fps
+                setInterval(updateStatus, 1000);
+                
+                function toggleRecording() {
+                    // Add recording toggle functionality here
+                }
+            </script>
+        </body>
+        </html>
+        """
 
-# Web routes
-@app.route('/')
-def index():
-    return render_template('index.html', 
-                          camera_connected=camera_connected,
-                          horizontal_pos=horizontal_pos,
-                          vertical_pos=vertical_pos,
-                          focus_pos=focus_pos)
+def run_server(camera_manager, servo_controller, input_manager, port=8000):
+    """Run the HTTP server with the camera stream."""
+    class Handler(CameraStreamHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, camera_manager=camera_manager,
+                            servo_controller=servo_controller,
+                            input_manager=input_manager, **kwargs)
 
-@app.route('/video_feed')
-def video_feed():
-    return Response(generate_frames(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
-
-@app.route('/api/status')
-def status():
-    return jsonify({
-        'camera_connected': camera_connected,
-        'horizontal_pos': horizontal_pos,
-        'vertical_pos': vertical_pos,
-        'focus_pos': focus_pos
-    })
-
-@app.route('/api/control', methods=['POST'])
-def control():
-    global horizontal_pos, vertical_pos, focus_pos
-    
-    data = request.json
-    if 'horizontal' in data:
-        horizontal_pos = max(-1, min(1, float(data['horizontal'])))
-        pwm_horizontal.ChangeDutyCycle(map_to_pwm(horizontal_pos))
-        
-    if 'vertical' in data:
-        vertical_pos = max(-1, min(1, float(data['vertical'])))
-        pwm_vertical.ChangeDutyCycle(map_to_pwm(vertical_pos))
-        
-    if 'focus' in data:
-        focus_pos = max(-1, min(1, float(data['focus'])))
-        pwm_focus.ChangeDutyCycle(map_to_pwm(focus_pos))
-    
-    return jsonify({
-        'success': True,
-        'horizontal_pos': horizontal_pos,
-        'vertical_pos': vertical_pos,
-        'focus_pos': focus_pos
-    })
+    server = HTTPServer(('', port), Handler)
+    logger.info(f"Starting server on port {port}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        logger.info("Server shutting down...")
+        server.server_close()
+        camera_manager.cleanup()
+        servo_controller.cleanup()
+        input_manager.cleanup()
 
 if __name__ == '__main__':
-    # Create templates directory if it doesn't exist
-    os.makedirs('templates', exist_ok=True)
-    
-    try:
-        app.run(host='0.0.0.0', port=8080, threaded=True)
-    except KeyboardInterrupt:
-        print("Web server shutting down...")
-    finally:
-        # Clean up GPIO
-        pwm_horizontal.stop()
-        pwm_vertical.stop()
-        pwm_focus.stop()
-        GPIO.cleanup() 
+    # Initialize components
+    camera_manager = CameraManager()
+    servo_controller = ServoController()
+    input_manager = InputManager(servo_controller)
+
+    # Connect to camera
+    if not camera_manager.connect():
+        logger.error("Failed to connect to camera")
+        sys.exit(1)
+
+    # Start input manager thread
+    input_thread = threading.Thread(target=input_manager.run)
+    input_thread.daemon = True
+    input_thread.start()
+
+    # Run the server
+    run_server(camera_manager, servo_controller, input_manager) 

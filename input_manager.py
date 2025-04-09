@@ -1,18 +1,23 @@
 import pygame
+import logging
 import threading
 import time
 import os
+from config import JOYSTICK_DEADZONE
+
+logger = logging.getLogger(__name__)
 
 class InputManager:
-    def __init__(self):
+    def __init__(self, servo_controller):
+        self.servo_controller = servo_controller
+        self.running = False
+        self.thread = None
+        self.joystick = None
+        self._init_pygame()
+        self._init_joystick()
+        
         # Debug flag
         self.debug = True
-        
-        # Initialize pygame if not already initialized
-        if not pygame.get_init():
-            pygame.init()
-            if self.debug:
-                print("Pygame initialized")
         
         # Initialize display before joystick to ensure video system is initialized
         if not pygame.display.get_init():
@@ -25,21 +30,6 @@ class InputManager:
             pygame.display.set_mode((1, 1), pygame.HIDDEN)
             if self.debug:
                 print("Display initialized")
-        
-        # Initialize joystick module if not already initialized
-        try:
-            if not pygame.joystick.get_init():
-                pygame.joystick.init()
-                if self.debug:
-                    print("Joystick module initialized")
-        except pygame.error as e:
-            print(f"Error initializing joystick module: {e}")
-            self.error = str(e)
-        
-        # Initialize joystick
-        self.joystick = None
-        self.connected = False
-        self.error = None
         
         # Control values (mapped)
         self.horizontal = 0
@@ -69,10 +59,40 @@ class InputManager:
         self._connect_joystick()
         
         # Start input thread
-        self.running = True
-        self.thread = threading.Thread(target=self._input_loop)
-        self.thread.daemon = True
-        self.thread.start()
+        self.start()
+    
+    def _init_pygame(self):
+        """Initialize pygame if not already initialized"""
+        if not pygame.get_init():
+            pygame.init()
+            logger.info("Pygame initialized")
+        
+        # Initialize display before joystick to ensure video system is initialized
+        if not pygame.display.get_init():
+            # Set SDL_VIDEODRIVER to dummy if on headless system
+            if not os.environ.get('DISPLAY') and not os.environ.get('WAYLAND_DISPLAY'):
+                os.environ['SDL_VIDEODRIVER'] = 'dummy'
+                if self.debug:
+                    print("Using dummy video driver for headless system")
+            pygame.display.init()
+            pygame.display.set_mode((1, 1), pygame.HIDDEN)
+            if self.debug:
+                print("Display initialized")
+    
+    def _init_joystick(self):
+        """Initialize joystick if available"""
+        pygame.joystick.init()
+        if pygame.joystick.get_count() > 0:
+            self.joystick = pygame.joystick.Joystick(0)
+            self.joystick.init()
+            logger.info(f"Joystick initialized: {self.joystick.get_name()}")
+            # Initialize button states
+            num_buttons = self.joystick.get_numbuttons()
+            self.button_states = {i: False for i in range(num_buttons)}
+            if self.debug:
+                print(f"Initialized {num_buttons} button states.")
+        else:
+            logger.warning("No joystick found")
     
     def _connect_joystick(self):
         """Try to connect to the first available joystick and init button states"""
@@ -114,40 +134,67 @@ class InputManager:
             self.error = str(e)
             print(f"Error connecting to joystick: {e}")
     
-    def _input_loop(self):
+    def _apply_deadzone(self, value):
+        """Apply deadzone to joystick values"""
+        if abs(value) < JOYSTICK_DEADZONE:
+            return 0
+        return value
+
+    def _process_joystick(self):
+        """Process joystick input and update servo positions"""
+        if not self.joystick:
+            return
+
+        # Get joystick values
+        horizontal = self._apply_deadzone(self.joystick.get_axis(0))
+        vertical = self._apply_deadzone(self.joystick.get_axis(1))
+        focus = self._apply_deadzone(self.joystick.get_axis(2))
+
+        # Update servo positions
+        self.servo_controller.update_position(
+            horizontal=horizontal,
+            vertical=vertical,
+            focus=focus
+        )
+
+    def run(self):
         """Main input processing loop"""
+        self.running = True
+        logger.info("Input manager started")
+
         while self.running:
             try:
-                if pygame.joystick.get_init():  # Check if joystick system is initialized
-                    # Check joystick connection
-                    if not self.connected and pygame.joystick.get_count() > 0:
-                        self._connect_joystick()
-                    elif self.connected and pygame.joystick.get_count() == 0:
-                        self.connected = False
-                        self.error = "Joystick disconnected"
-                        if self.debug:
-                            print("Joystick disconnected")
-                    
-                    # Process events in the main loop
-                    quit_requested = self.process_events()
-                    if quit_requested:
+                # Process pygame events
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
                         self.running = False
-                else:
-                    # Try to initialize joystick system if it's not initialized
-                    try:
-                        pygame.joystick.init()
-                        print("Joystick system initialized")
-                    except pygame.error as e:
-                        self.error = f"Failed to initialize joystick system: {e}"
-                        print(self.error)
-                
-                time.sleep(0.01)  # Small delay to prevent CPU overuse
-                
+                        break
+
+                # Process joystick input
+                self._process_joystick()
+
+                # Small sleep to prevent CPU overuse
+                time.sleep(0.01)
+
             except Exception as e:
-                self.error = str(e)
-                print(f"Error in input loop: {e}")
-                time.sleep(1)  # Longer delay on error
-    
+                logger.error(f"Error in input manager: {e}")
+                time.sleep(1)  # Sleep on error to prevent rapid retries
+
+        logger.info("Input manager stopped")
+
+    def start(self):
+        """Start the input manager in a background thread"""
+        if self.thread is None or not self.thread.is_alive():
+            self.thread = threading.Thread(target=self.run)
+            self.thread.daemon = True
+            self.thread.start()
+
+    def stop(self):
+        """Stop the input manager"""
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=1.0)
+
     def process_events(self):
         """Process pygame events and update raw/mapped values"""
         quit_requested = False
@@ -234,8 +281,8 @@ class InputManager:
     
     def cleanup(self):
         """Clean up resources"""
-        self.running = False
-        if self.thread.is_alive():
-            self.thread.join()
-        # Don't quit pygame here, as it might be used by other parts of the application
+        self.stop()
+        if self.joystick:
+            self.joystick.quit()
+        pygame.joystick.quit()
         print("Input manager cleaned up") 
