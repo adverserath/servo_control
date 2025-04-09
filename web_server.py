@@ -50,14 +50,17 @@ class CameraStreamHandler(BaseHTTPRequestHandler):
 
     def _stream_camera(self):
         """Stream camera frames to the client."""
+        print("DEBUG: Starting camera stream")
         try:
             while True:
                 success, frame_bytes = self.camera_manager.get_frame()
                 if not success:
+                    print("DEBUG: Failed to get frame from camera manager")
                     time.sleep(0.1)
                     continue
 
                 # Send frame
+                print("DEBUG: Sending frame to client")
                 self.wfile.write(b'--frame\r\n')
                 self.send_header('Content-Type', 'image/jpeg')
                 self.send_header('Content-Length', len(frame_bytes))
@@ -69,7 +72,7 @@ class CameraStreamHandler(BaseHTTPRequestHandler):
                 time.sleep(1.0 / FRAME_RATE)
 
         except Exception as e:
-            logger.error(f"Error in camera stream: {e}")
+            logger.error(f"DEBUG: Error in camera stream: {e}")
             return
 
     def _get_html(self):

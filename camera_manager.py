@@ -156,9 +156,11 @@ class CameraManager:
     
     def _capture_loop(self):
         """Background thread for continuous frame capture."""
+        print("DEBUG: Starting capture loop")
         while self.is_running:
             try:
                 if self.camera is None:
+                    print("DEBUG: Camera is None, waiting...")
                     time.sleep(0.1)
                     continue
                 
@@ -170,12 +172,15 @@ class CameraManager:
                 
                 # Capture frame
                 if picamera2_available and isinstance(self.camera, Picamera2):
+                    print("DEBUG: Capturing frame with PiCamera2")
                     frame = self.camera.capture_array()
                 else:
                     # OpenCV
+                    print("DEBUG: Capturing frame with OpenCV")
                     ret, frame = self.camera.read()
                     if not ret:
                         self.connection_error = "Failed to read frame"
+                        print("DEBUG: Failed to read frame with OpenCV")
                         time.sleep(0.1)
                         continue
                 
@@ -184,10 +189,11 @@ class CameraManager:
                     self.current_frame = frame
                     self.last_frame_time = current_time
                     self.connection_error = None
+                    print("DEBUG: Frame updated successfully")
                 
             except Exception as e:
                 self.connection_error = str(e)
-                print(f"Error in capture loop: {e}")
+                print(f"DEBUG: Error in capture loop: {e}")
                 time.sleep(0.1)
     
     def get_frame(self) -> Tuple[bool, Optional[bytes]]:
@@ -198,17 +204,21 @@ class CameraManager:
         try:
             with self.frame_lock:
                 if self.current_frame is None:
+                    print("DEBUG: No frame available")
                     return False, None
                 
                 # Convert frame to JPEG
                 ret, buffer = cv2.imencode('.jpg', self.current_frame)
                 if not ret:
+                    print("DEBUG: Failed to encode frame as JPEG")
                     return False, None
                 
+                print("DEBUG: Frame captured and encoded successfully")
                 return True, buffer.tobytes()
                 
         except Exception as e:
             self.connection_error = str(e)
+            print(f"DEBUG: Error in get_frame: {e}")
             return False, None
     
     def get_status(self) -> dict:
