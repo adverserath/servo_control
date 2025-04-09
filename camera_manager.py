@@ -75,34 +75,58 @@ class CameraManager:
             if not IS_RASPBERRY_PI:
                 self.connection_error = "Not running on a Raspberry Pi"
                 return False
+            
+            # Try to use PiCamera2 if available
+            if picamera2_available:
+                # Create Picamera2 object
+                self.camera = Picamera2()
                 
-            if not picamera2_available:
-                self.connection_error = "PiCamera2 library not available"
-                return False
-            
-            # Create Picamera2 object
-            self.camera = Picamera2()
-            
-            # Configure camera
-            config = self.camera.create_preview_configuration(
-                main={"size": (self.frame_width, self.frame_height), "format": "RGB888"},
-                lores={"size": (320, 240), "format": "YUV420"}
-            )
-            self.camera.configure(config)
-            
-            # Start camera
-            self.camera.start()
-            
-            # Start capture thread
-            self.is_running = True
-            self.capture_thread = threading.Thread(target=self._capture_loop)
-            self.capture_thread.daemon = True
-            self.capture_thread.start()
-            
-            self.is_connected = True
-            self.connection_error = None
-            print("Successfully connected to Raspberry Pi camera")
-            return True
+                # Configure camera
+                config = self.camera.create_preview_configuration(
+                    main={"size": (self.frame_width, self.frame_height), "format": "RGB888"},
+                    lores={"size": (320, 240), "format": "YUV420"}
+                )
+                self.camera.configure(config)
+                
+                # Start camera
+                self.camera.start()
+                
+                # Start capture thread
+                self.is_running = True
+                self.capture_thread = threading.Thread(target=self._capture_loop)
+                self.capture_thread.daemon = True
+                self.capture_thread.start()
+                
+                self.is_connected = True
+                self.connection_error = None
+                print("Successfully connected to Raspberry Pi camera using PiCamera2")
+                return True
+            else:
+                # Fallback to OpenCV with Pi's camera device
+                print("PiCamera2 not available, falling back to OpenCV with Pi's camera device")
+                
+                # Use the Pi's camera device (usually /dev/video0)
+                self.camera = cv2.VideoCapture(0)
+                
+                if not self.camera.isOpened():
+                    self.connection_error = "Failed to open camera device"
+                    return False
+                
+                # Set camera properties
+                self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
+                self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
+                self.camera.set(cv2.CAP_PROP_FPS, self.fps)
+                
+                # Start capture thread
+                self.is_running = True
+                self.capture_thread = threading.Thread(target=self._capture_loop)
+                self.capture_thread.daemon = True
+                self.capture_thread.start()
+                
+                self.is_connected = True
+                self.connection_error = None
+                print("Successfully connected to Raspberry Pi camera using OpenCV")
+                return True
             
         except Exception as e:
             self.connection_error = str(e)
@@ -118,9 +142,9 @@ class CameraManager:
         
         if self.camera is not None:
             try:
-                self.camera.stop()
+                self.camera.release()
             except Exception as e:
-                print(f"Error stopping camera: {e}")
+                print(f"Error releasing camera: {e}")
             finally:
                 self.camera = None
         
@@ -142,7 +166,15 @@ class CameraManager:
                     continue
                 
                 # Capture frame
-                frame = self.camera.capture_array()
+                if picamera2_available and isinstance(self.camera, Picamera2):
+                    frame = self.camera.capture_array()
+                else:
+                    # OpenCV
+                    ret, frame = self.camera.read()
+                    if not ret:
+                        self.connection_error = "Failed to read frame"
+                        time.sleep(0.1)
+                        continue
                 
                 # Update frame
                 with self.frame_lock:
@@ -189,21 +221,30 @@ class CameraManager:
     def _cleanup_camera_object(self):
          """Safely close/release the current camera object"""
          if self.camera:
-             camera_type_to_clean = "PiCamera2"
-             print(f"Cleaning up {camera_type_to_clean} object...")
-             try:
-                 self.camera.stop()
-                 print("Camera stopped.")
-             except Exception as e:
-                 print(f"Error during camera object cleanup: {e}")
-             finally:
-                 self.camera = None # Set to None regardless of cleanup success
-                 # --- Explicit Garbage Collection --- 
-                 print("Running garbage collection...")
-                 gc.collect()
-                 # --- Add Delay Here --- 
-                 print("Waiting briefly after camera cleanup...")
-                 time.sleep(1.5) # Give 1.5 seconds for resource release
+             if picamera2_available and isinstance(self.camera, Picamera2):
+                 camera_type_to_clean = "PiCamera2"
+                 print(f"Cleaning up {camera_type_to_clean} object...")
+                 try:
+                     self.camera.stop()
+                     print("Camera stopped.")
+                 except Exception as e:
+                     print(f"Error during camera object cleanup: {e}")
+             else:
+                 camera_type_to_clean = "OpenCV"
+                 print(f"Cleaning up {camera_type_to_clean} object...")
+                 try:
+                     self.camera.release()
+                     print("Camera released.")
+                 except Exception as e:
+                     print(f"Error during camera object cleanup: {e}")
+             
+             self.camera = None # Set to None regardless of cleanup success
+             # --- Explicit Garbage Collection --- 
+             print("Running garbage collection...")
+             gc.collect()
+             # --- Add Delay Here --- 
+             print("Waiting briefly after camera cleanup...")
+             time.sleep(1.5) # Give 1.5 seconds for resource release
          else:
              pass
 
