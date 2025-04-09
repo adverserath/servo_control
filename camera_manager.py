@@ -142,9 +142,12 @@ class CameraManager:
         
         if self.camera is not None:
             try:
-                self.camera.release()
+                if picamera2_available and isinstance(self.camera, Picamera2):
+                    self.camera.stop()
+                else:
+                    self.camera.release()
             except Exception as e:
-                print(f"Error releasing camera: {e}")
+                print(f"Error stopping/releasing camera: {e}")
             finally:
                 self.camera = None
         
