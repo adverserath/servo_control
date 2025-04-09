@@ -24,9 +24,10 @@ def main():
 
         # Connect to camera
         logger.info("Connecting to camera...")
-        if not camera_manager.connect():
-            logger.error("Failed to connect to camera")
-            sys.exit(1)
+        camera_connected = camera_manager.connect()
+        if not camera_connected:
+            logger.warning("Failed to connect to camera, continuing without camera")
+            # We'll continue without the camera
 
         # Start input manager thread
         logger.info("Starting input manager...")

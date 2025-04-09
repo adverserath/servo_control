@@ -63,6 +63,9 @@ class CameraManager:
         self.is_connected = False
         self.connection_error = None
         
+        # Initialize capture thread
+        self.capture_thread = None
+        
     def connect(self) -> bool:
         """Establish connection to the Raspberry Pi camera."""
         try:
@@ -114,8 +117,12 @@ class CameraManager:
             self.capture_thread.join(timeout=1.0)
         
         if self.camera is not None:
-            self.camera.release()
-            self.camera = None
+            try:
+                self.camera.stop()
+            except Exception as e:
+                print(f"Error stopping camera: {e}")
+            finally:
+                self.camera = None
         
         self.is_connected = False
         self.current_frame = None
@@ -182,11 +189,11 @@ class CameraManager:
     def _cleanup_camera_object(self):
          """Safely close/release the current camera object"""
          if self.camera:
-             camera_type_to_clean = "RTSP"
+             camera_type_to_clean = "PiCamera2"
              print(f"Cleaning up {camera_type_to_clean} object...")
              try:
-                 self.camera.release()
-                 print("RTSP camera released.")
+                 self.camera.stop()
+                 print("Camera stopped.")
              except Exception as e:
                  print(f"Error during camera object cleanup: {e}")
              finally:
@@ -198,24 +205,19 @@ class CameraManager:
                  print("Waiting briefly after camera cleanup...")
                  time.sleep(1.5) # Give 1.5 seconds for resource release
          else:
-             # If self.camera was already None, maybe still collect?
-             # print("Running garbage collection (camera was None)...")
-             # gc.collect()
              pass
 
     def cleanup(self):
         """Clean up all resources"""
         print("Cleaning up camera manager...")
         self.is_running = False
-        if self.capture_thread:
+        if hasattr(self, 'capture_thread') and self.capture_thread:
             print("Waiting for capture thread to finish...")
             self.capture_thread.join(timeout=2.0) # Wait for thread with timeout
             if self.capture_thread.is_alive():
                  print("Warning: Capture thread did not terminate gracefully.")
         # Clean up camera object itself
         self._cleanup_camera_object()
-        # Optional: Add gc.collect() here too?
-        # gc.collect()
         print("Camera manager cleaned up.")
 
     # Remove old __del__ if it exists, cleanup() is preferred

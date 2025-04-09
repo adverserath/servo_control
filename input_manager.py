@@ -13,11 +13,12 @@ class InputManager:
         self.running = False
         self.thread = None
         self.joystick = None
+        
+        # Debug flag - initialize before it's used
+        self.debug = True
+        
         self._init_pygame()
         self._init_joystick()
-        
-        # Debug flag
-        self.debug = True
         
         # Initialize display before joystick to ensure video system is initialized
         if not pygame.display.get_init():
