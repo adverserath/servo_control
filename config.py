@@ -8,9 +8,6 @@ load_dotenv()
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600
 
-# RTSP camera settings
-RTSP_URL = os.getenv('RTSP_URL', 'rtsp://admin:admin@192.168.0.236:554/stream1')
-
 # GPIO pins for servos
 HORIZONTAL_PIN = int(os.environ.get('SERVO_HORIZONTAL_PIN', 17))
 VERTICAL_PIN = int(os.environ.get('SERVO_VERTICAL_PIN', 18))

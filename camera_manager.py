@@ -65,25 +65,31 @@ class CameraManager:
         self.connection_error = None
         
     def connect(self) -> bool:
-        """Establish connection to the RTSP camera."""
+        """Establish connection to the Raspberry Pi camera."""
         try:
             if self.camera is not None:
                 self.disconnect()
             
-            # Configure OpenCV for RTSP
-            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
-            
-            # Create VideoCapture object
-            self.camera = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
-            
-            if not self.camera.isOpened():
-                self.connection_error = "Failed to open camera connection"
+            if not IS_RASPBERRY_PI:
+                self.connection_error = "Not running on a Raspberry Pi"
+                return False
+                
+            if not picamera2_available:
+                self.connection_error = "PiCamera2 library not available"
                 return False
             
-            # Set camera properties
-            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
-            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
-            self.camera.set(cv2.CAP_PROP_FPS, self.fps)
+            # Create Picamera2 object
+            self.camera = Picamera2()
+            
+            # Configure camera
+            config = self.camera.create_preview_configuration(
+                main={"size": (self.frame_width, self.frame_height), "format": "RGB888"},
+                lores={"size": (320, 240), "format": "YUV420"}
+            )
+            self.camera.configure(config)
+            
+            # Start camera
+            self.camera.start()
             
             # Start capture thread
             self.is_running = True
@@ -93,11 +99,13 @@ class CameraManager:
             
             self.is_connected = True
             self.connection_error = None
+            print("Successfully connected to Raspberry Pi camera")
             return True
             
         except Exception as e:
             self.connection_error = str(e)
             self.is_connected = False
+            print(f"Failed to connect to camera: {e}")
             return False
     
     def disconnect(self):
@@ -117,7 +125,7 @@ class CameraManager:
         """Background thread for continuous frame capture."""
         while self.is_running:
             try:
-                if self.camera is None or not self.camera.isOpened():
+                if self.camera is None:
                     time.sleep(0.1)
                     continue
                 
@@ -128,11 +136,7 @@ class CameraManager:
                     continue
                 
                 # Capture frame
-                ret, frame = self.camera.read()
-                if not ret:
-                    self.connection_error = "Failed to read frame"
-                    time.sleep(0.1)
-                    continue
+                frame = self.camera.capture_array()
                 
                 # Update frame
                 with self.frame_lock:
@@ -142,6 +146,7 @@ class CameraManager:
                 
             except Exception as e:
                 self.connection_error = str(e)
+                print(f"Error in capture loop: {e}")
                 time.sleep(0.1)
     
     def get_frame(self) -> Tuple[bool, Optional[bytes]]:
