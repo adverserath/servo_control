@@ -2,12 +2,18 @@ import os
 import time
 import threading
 import cv2
-import numpy as np
-from flask import Flask, Response, render_template, request, jsonify
+import pygame
+import asyncio
+import urllib.parse
+from flask import Flask, Response, render_template, request, jsonify, send_from_directory
 from dotenv import load_dotenv
 import RPi.GPIO as GPIO
-from config import SCREEN_WIDTH, SCREEN_HEIGHT, HORIZONTAL_PIN, VERTICAL_PIN, FOCUS_PIN, PWM_FREQ
+from config import SCREEN_WIDTH, SCREEN_HEIGHT, HORIZONTAL_PIN, VERTICAL_PIN, FOCUS_PIN, PWM_FREQ, FRAME_RATE
 from motor_controller import create_motor_controller
+from camera_manager import CameraManager
+from servo_manager import ServoManager
+from input_manager import InputManager
+from telegram_sender import send_photo_to_telegram
 
 # Load environment variables
 load_dotenv()
@@ -23,9 +29,6 @@ if not os.environ.get('XDG_RUNTIME_DIR'):
 app = Flask(__name__)
 
 # Camera Configuration
-camera_connected = False
-frame = None
-frame_lock = threading.Lock()
 
 # Setup GPIO
 GPIO.setmode(GPIO.BCM)
@@ -47,44 +50,6 @@ pwm_focus.start(0)
 horizontal_pos = 0
 vertical_pos = 0
 focus_pos = 0
-
-# Thread to capture from Pi camera
-def camera_stream_thread():
-    global frame, camera_connected
-    
-    try:
-        # Initialize Pi camera
-        import picamera
-        import picamera.array
-        
-        with picamera.PiCamera() as camera:
-            camera.resolution = (800, 600)
-            camera.framerate = 30
-            
-            # Create a numpy array to store the frame
-            output = picamera.array.PiRGBArray(camera, size=(800, 600))
-            
-            camera_connected = True
-            print("Pi camera connected")
-            
-            for frame_array in camera.capture_continuous(output, format='bgr', use_video_port=True):
-                with frame_lock:
-                    frame = frame_array.array
-                output.truncate(0)
-                time.sleep(0.033)  # ~30fps
-                
-    except Exception as e:
-        print(f"Camera Error: {e}")
-        camera_connected = False
-        time.sleep(5)  # Wait before retrying
-
-# Function to map from -1,1 range to PWM duty cycle
-def map_to_pwm(value):
-    return (value + 1) * 50  # Map from -1,1 to 0,100
-
-# Start the camera capture thread
-camera_thread = threading.Thread(target=camera_stream_thread, daemon=True)
-camera_thread.start()
 
 # Generate frames for MJPEG stream
 def generate_frames():
