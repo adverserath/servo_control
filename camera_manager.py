@@ -7,6 +7,7 @@ import gc # Import garbage collector
 from config import SCREEN_WIDTH, SCREEN_HEIGHT, FRAME_RATE
 from dotenv import load_dotenv
 from typing import Optional, Tuple
+import numpy as np
 
 # Try importing picamera2, handle failure gracefully
 try:
@@ -138,8 +139,18 @@ class CameraManager:
                     else:
                         print(f"Failed to open video device /dev/video{device_id}")
                 
-                self.connection_error = "Failed to connect to any video device"
-                return False
+                # If no camera is available, create a dummy camera
+                print("No camera available, creating dummy camera")
+                self.camera = None
+                self.is_running = True
+                self.capture_thread = threading.Thread(target=self._dummy_capture_loop)
+                self.capture_thread.daemon = True
+                self.capture_thread.start()
+                
+                self.is_connected = True
+                self.connection_error = "Using dummy camera (no real camera available)"
+                print("Successfully created dummy camera")
+                return True
             
         except Exception as e:
             self.connection_error = str(e)
@@ -207,6 +218,39 @@ class CameraManager:
             except Exception as e:
                 self.connection_error = str(e)
                 print(f"DEBUG: Error in capture loop: {e}")
+                time.sleep(0.1)
+    
+    def _dummy_capture_loop(self):
+        """Background thread for generating dummy frames."""
+        print("DEBUG: Starting dummy capture loop")
+        
+        while self.is_running:
+            try:
+                # Check if it's time for next frame
+                current_time = time.time()
+                if current_time - self.last_frame_time < self.frame_interval:
+                    time.sleep(0.001)  # Small sleep to prevent CPU hogging
+                    continue
+                
+                # Create a dummy frame (blue background with text)
+                frame = np.zeros((self.frame_height, self.frame_width, 3), dtype=np.uint8)
+                frame[:, :, 0] = 255  # Blue channel
+                
+                # Add text to the frame
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                cv2.putText(frame, "No Camera Available", (50, 50), font, 1, (255, 255, 255), 2)
+                cv2.putText(frame, "Using Dummy Camera", (50, 100), font, 1, (255, 255, 255), 2)
+                
+                # Update frame
+                with self.frame_lock:
+                    self.current_frame = frame
+                    self.last_frame_time = current_time
+                    self.connection_error = "Using dummy camera (no real camera available)"
+                    print("DEBUG: Dummy frame updated successfully")
+                
+            except Exception as e:
+                self.connection_error = str(e)
+                print(f"DEBUG: Error in dummy capture loop: {e}")
                 time.sleep(0.1)
     
     def get_frame(self) -> Tuple[bool, Optional[bytes]]:
