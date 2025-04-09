@@ -47,7 +47,6 @@ class CameraManager:
         load_dotenv()
         
         # Camera settings
-        self.rtsp_url = os.getenv('RTSP_URL')
         self.frame_width = 640
         self.frame_height = 480
         self.fps = 30
