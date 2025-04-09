@@ -11,6 +11,7 @@ from camera_manager import CameraManager
 from servo_manager import ServoManager
 from input_manager import InputManager
 from telegram_sender import send_photo_to_telegram
+from config import FRAME_RATE
 
 # Handle XDG_RUNTIME_DIR issue on Raspberry Pi OS
 if not os.environ.get('XDG_RUNTIME_DIR'):
