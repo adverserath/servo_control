@@ -894,18 +894,40 @@ class WebCameraServer:
     def _generate_frames(self):
         """Generate frames for MJPEG streaming"""
         while True:
-            frame = self.camera_manager.get_frame()
+            # Get the latest frame from the camera manager
+            frame = self.camera_manager.get_frame() 
             
             if frame is not None:
-                # Encode as JPEG
-                _, buffer = cv2.imencode('.jpg', frame)
-                frame_bytes = buffer.tobytes()
+                processed_frame = frame # Assume BGR by default
+                # --- Convert PiCamera frame to BGR for JPEG encoding --- 
+                if self.camera_manager.camera_type == "Raspberry Pi Camera":
+                    try:
+                        # Frame from get_frame() should be RGB888 based on config
+                        # print("Converting frame to BGR for JPEG stream...") # Debug
+                        processed_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    except cv2.error as cv_err:
+                        print(f"OpenCV error during BGR conversion for streaming: {cv_err}")
+                        # Send a placeholder or skip frame?
+                        # For now, try to stream the original frame
+                        processed_frame = frame 
+                # --- End Conversion --- 
                 
-                # Yield for MJPEG streaming
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                # Encode as JPEG (expects BGR)
+                ret, buffer = cv2.imencode('.jpg', processed_frame)
+                if ret:
+                    frame_bytes = buffer.tobytes()
+                    # Yield for MJPEG streaming
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                else:
+                     print("JPEG encoding failed.")
+            else:
+                # print("No frame available from camera manager.") # Debug
+                # Send a placeholder image if no frame? (optional)
+                pass # Or just wait
             
-            time.sleep(0.033)  # ~30fps
+            # Adjust sleep time - maybe slightly longer if frames are slow
+            time.sleep(max(0.01, 1.0 / FRAME_RATE)) # Use FRAME_RATE from config
     
     def start(self):
         """Start the web server in a separate thread"""

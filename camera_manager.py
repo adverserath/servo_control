@@ -96,27 +96,34 @@ class CameraManager:
                 break # Exit capture loop
                 
             try:
-                frame_data = self._capture_frame()
-                if frame_data is not None:
-                    with self.frame_lock:
-                        self.frame = frame_data
-                    # No need to clear error here, should be None if we got here
-                    
-                    # Write frame if recording
-                    with self.recording_lock:
-                        if self.is_recording and self.video_writer:
-                            # Ensure frame is in BGR format for VideoWriter
-                            if self.camera_type == "Raspberry Pi Camera":
-                                # Picamera2 captures in RGB, convert to BGR
-                                bgr_frame = cv2.cvtColor(frame_data, cv2.COLOR_RGB2BGR)
-                                self.video_writer.write(bgr_frame)
-                            else: # Webcam likely BGR already from OpenCV
-                                self.video_writer.write(frame_data)
-                else:
-                     # Failed to capture frame - exit loop
-                     print(f"Failed to capture frame using {self.camera_type}. Camera thread exiting.")
-                     self.error = "Failed to capture frame."
-                     break # Exit capture loop
+                if self.connected and self.camera is not None:
+                    frame_data = self._capture_frame()
+                    if frame_data is not None:
+                        # --- Store the captured frame (likely RGB from PiCam) --- 
+                        with self.frame_lock:
+                            self.frame = frame_data 
+                        self.error = None # Clear error on successful frame
+                        
+                        # Write frame if recording
+                        with self.recording_lock:
+                            if self.is_recording and self.video_writer:
+                                # Ensure frame is in BGR format for VideoWriter
+                                if self.camera_type == "Raspberry Pi Camera":
+                                    # Picamera2 configured for RGB888, convert to BGR for saving
+                                    # print("Converting frame to BGR for recording...") # Debug print
+                                    try:
+                                        bgr_frame = cv2.cvtColor(frame_data, cv2.COLOR_RGB2BGR)
+                                        self.video_writer.write(bgr_frame)
+                                    except cv2.error as cv_err:
+                                        print(f"OpenCV error during BGR conversion for recording: {cv_err}")
+                                        # Optionally stop recording or handle error
+                                else: # Webcam likely BGR already from OpenCV
+                                    self.video_writer.write(frame_data)
+                    else:
+                         # Failed to capture frame - exit loop
+                         print(f"Failed to capture frame using {self.camera_type}. Camera thread exiting.")
+                         self.error = "Failed to capture frame."
+                         break # Exit capture loop
                 
                 # Frame rate handled by sleep
                 time.sleep(max(0.001, 1.0 / FRAME_RATE)) 
@@ -145,11 +152,16 @@ class CameraManager:
             self._cleanup_camera_object() # Ensure any previous instance is closed
             self.camera = Picamera2()
             
-            # --- Try Still Configuration --- 
-            # Use create_still_configuration instead of preview as a test
-            print("Attempting still configuration...")
-            config = self.camera.create_still_configuration()
-            # --- End Still Configuration ---
+            # --- Use Preview Configuration with Size --- 
+            print(f"Attempting preview configuration with size {SCREEN_WIDTH}x{SCREEN_HEIGHT}...")
+            # Specify main stream size and potentially format (e.g., RGB888)
+            config = self.camera.create_preview_configuration(
+                main={"size": (SCREEN_WIDTH, SCREEN_HEIGHT), "format": "RGB888"} 
+                # Add other streams if needed, e.g., lores for low-res stream
+                # lores={"size": (320, 240)}, display="lores"
+            )
+            print(f"Configuration created: {config}") # Print the config dict
+            # --- End Preview Configuration ---
             
             # Apply the configuration
             print("Configuring Pi Camera...")
