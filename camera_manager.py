@@ -83,7 +83,14 @@ class CameraManager:
                     '--codec', 'h264',
                     '--inline',  # Enable h264 inline headers
                     '--listen',  # Enable TCP connection
-                    '-t', '0',  # Run indefinitely
+                    '--nopreview',  # Disable preview window
+                    '--timeout', '0',  # Run indefinitely
+                    '--framerate', '30',  # Set framerate
+                    '--bitrate', '1000000',  # Lower bitrate for faster encoding
+                    '--profile', 'baseline',  # Use baseline profile for lower latency
+                    '--level', '4.0',  # Use level 4.0 for better compatibility
+                    '--intra', '30',  # Set keyframe interval
+                    '--tuning-file', '/usr/share/libcamera/ipa/rpi/vc4/rpi_tuning.yaml',  # Use VC4 tuning
                     '-o', 'tcp://127.0.0.1:8888'  # Output to TCP
                 ],
                 stdout=subprocess.PIPE,
@@ -107,6 +114,9 @@ class CameraManager:
                 logger.error("Failed to open TCP connection to libcamera-vid")
                 self.connection_error = "Failed to open TCP connection to libcamera-vid"
                 return False
+            
+            # Set OpenCV buffer size to minimum
+            self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             
             # Start capture thread
             self.is_running = True
@@ -161,34 +171,32 @@ class CameraManager:
         while self.is_running:
             try:
                 if self.camera is None:
-                    time.sleep(0.1)
+                    time.sleep(0.001)  # Reduced sleep time
                     continue
                 
-                # Check if it's time for next frame
-                current_time = time.time()
-                if current_time - self.last_frame_time < self.frame_interval:
-                    time.sleep(0.001)  # Small sleep to prevent CPU hogging
-                    continue
-                
-                # Capture frame
+                # Capture frame without checking time interval
                 ret, frame = self.camera.read()
                 if not ret:
                     self.connection_error = "Failed to read frame"
                     logger.error("Failed to read frame")
-                    time.sleep(0.1)
+                    time.sleep(0.001)  # Reduced sleep time
                     continue
                 
-                # Update frame
-                with self.frame_lock:
+                # Update frame without lock if possible
+                if not hasattr(self, '_frame_lock_acquired'):
+                    with self.frame_lock:
+                        self.current_frame = frame
+                        self.last_frame_time = time.time()
+                        self.connection_error = None
+                else:
                     self.current_frame = frame
-                    self.last_frame_time = current_time
+                    self.last_frame_time = time.time()
                     self.connection_error = None
-                    logger.debug("Frame updated successfully")
                 
             except Exception as e:
                 self.connection_error = str(e)
                 logger.error(f"Error in capture loop: {e}")
-                time.sleep(0.1)
+                time.sleep(0.001)  # Reduced sleep time
     
     def get_frame(self) -> Tuple[bool, Optional[bytes]]:
         """
